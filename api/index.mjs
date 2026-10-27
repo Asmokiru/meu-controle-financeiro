@@ -1,31 +1,28 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import { defaultStore } from '../src/lib/store/database.ts';
-import { createAppController } from '../src/server/app-server.ts';
+import { defaultStore } from './_dist/lib/store/database.mjs';
+import { createAppController } from './_dist/server/app-server.mjs';
 import {
   isSupabaseServerSyncEnabled,
   syncStoreToSupabase,
-} from '../src/lib/store/supabase-sync.ts';
+} from './_dist/lib/store/supabase-sync.mjs';
 
 const controller = createAppController(defaultStore);
 
-async function parseRequestBody(
-  req: IncomingMessage & { body?: unknown }
-): Promise<Record<string, unknown>> {
+function parseRequestBody(req) {
   if (req.body && typeof req.body === 'object') {
-    return req.body as Record<string, unknown>;
+    return Promise.resolve(req.body);
   }
   if (typeof req.body === 'string' && req.body.trim()) {
     try {
-      return JSON.parse(req.body);
+      return Promise.resolve(JSON.parse(req.body));
     } catch {
-      return {};
+      return Promise.resolve({});
     }
   }
   return new Promise((resolve) => {
     let raw = '';
     req.on('data', (chunk) => {
       raw += chunk;
-      if (raw.length > 1_000_000) raw = raw.slice(0, 1_000_000);
+      if (raw.length > 1000000) raw = raw.slice(0, 1000000);
     });
     req.on('end', () => {
       if (!raw) return resolve({});
@@ -39,10 +36,7 @@ async function parseRequestBody(
   });
 }
 
-export default async function handler(
-  req: IncomingMessage & { body?: unknown },
-  res: ServerResponse
-) {
+export default async function handler(req, res) {
   const method = (req.method || 'GET').toUpperCase();
   const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
   const body = isMutation ? await parseRequestBody(req) : {};
@@ -56,7 +50,7 @@ export default async function handler(
   const result = await controller.dispatch({
     method,
     url: req.url || '/',
-    headers: req.headers as Record<string, string | undefined>,
+    headers: req.headers,
     body,
     clientIp,
   });
