@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "node --watch --experimental-strip-types src/server/app-server.ts",
     "security:check": "node --experimental-strip-types scripts/security-regression-check.ts",
-    "build": "node --experimental-strip-types scripts/security-regression-check.ts",
+    "build": "node -e \"console.log('Build serverless pronto')\"",
     "start": "node --experimental-strip-types src/server/app-server.ts",
     "test": "node --experimental-strip-types scripts/security-regression-check.ts && node --experimental-strip-types --test tests/platform.test.ts",
     "db:seed": "node --experimental-strip-types prisma/seed.ts"
