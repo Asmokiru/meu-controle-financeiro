@@ -1,0 +1,22 @@
+{
+  "name": "meu-controle-financeiro",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Plataforma web completa de gestão financeira pessoal com foco em privacidade (LGPD), segurança (MFA/Argon2id/RLS) e acessibilidade (WCAG 2.2 AA).",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "node --watch --experimental-strip-types src/server/app-server.ts",
+    "security:check": "node --experimental-strip-types scripts/security-regression-check.ts",
+    "build": "node --experimental-strip-types scripts/security-regression-check.ts",
+    "start": "node --experimental-strip-types src/server/app-server.ts",
+    "test": "node --experimental-strip-types scripts/security-regression-check.ts && node --experimental-strip-types --test tests/platform.test.ts",
+    "db:seed": "node --experimental-strip-types prisma/seed.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.48.0",
+    "server-only": "^0.0.1"
+  }
+}

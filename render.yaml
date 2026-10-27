@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: meu-controle-financeiro
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run security:check
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false

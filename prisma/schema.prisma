@@ -1,0 +1,618 @@
+// ============================================================================
+// Meu Controle Financeiro - Prisma Schema (PostgreSQL)
+// Arquitetura Security by Design & Privacy by Design (LGPD)
+// Todas as entidades financeiras possuem vínculo obrigatório com userId
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum IncomeType {
+  FIXED
+  VARIABLE
+  MIXED
+}
+
+enum BudgetControlMode {
+  INDIVIDUAL
+  FAMILY
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CASH_WALLET
+  DIGITAL_ACCOUNT
+  INVESTMENT
+  LOAN_FINANCING
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+  INVESTMENT
+  DEBT_PAYMENT
+}
+
+enum PaymentMethod {
+  CASH
+  PIX
+  DEBIT
+  CREDIT
+  BOLETO
+  TRANSFER
+  OTHER
+}
+
+enum TransactionStatus {
+  PAID
+  PENDING
+  SCHEDULED
+  OVERDUE
+}
+
+enum RecurrenceType {
+  ONCE
+  WEEKLY
+  MONTHLY
+  YEARLY
+  CUSTOM
+}
+
+enum GoalPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum DebtStatus {
+  ACTIVE
+  NEGOTIATING
+  PAID_OFF
+  OVERDUE
+}
+
+enum DebtStrategy {
+  AVALANCHE
+  SNOWBALL
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  BOTH
+  NONE
+}
+
+enum NotificationType {
+  UPCOMING_DUE
+  OVERDUE_BILL
+  BUDGET_THRESHOLD
+  UNUSUAL_EXPENSE
+  LOW_BALANCE
+  NEW_RECURRING_DETECTED
+  GOAL_REACHED
+  WEEKLY_REMINDER
+  DUPLICATE_PAYMENT_WARNING
+  HIGH_CARD_USAGE
+  SECURITY_ALERT
+}
+
+enum ExportFormat {
+  JSON
+  CSV
+  XLSX
+  PDF
+}
+
+enum ExportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  EXPIRED
+  FAILED
+}
+
+enum SecuritySeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// 1. User
+model User {
+  id                        String    @id @default(uuid()) @db.Uuid
+  name                      String    @db.VarChar(120)
+  email                     String    @unique @db.VarChar(255)
+  passwordHash              String    @db.VarChar(255) // Argon2id hash
+  emailVerified             Boolean   @default(false)
+  emailVerificationToken    String?   @db.VarChar(128)
+  emailVerificationExpires  DateTime?
+  passwordResetTokenHash    String?   @db.VarChar(128)
+  passwordResetExpires      DateTime?
+  failedLoginAttempts       Int       @default(0)
+  lockedUntil               DateTime?
+  deletionRequestedAt       DateTime?
+  deletionScheduledFor      DateTime?
+  isDemoAccount             Boolean   @default(false)
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  // Relações (Isolamento estrito por usuário)
+  profile                   UserProfile?
+  mfaConfiguration          MFAConfiguration?
+  sessions                  Session[]
+  accounts                  Account[]
+  creditCards               CreditCard[]
+  transactions              Transaction[]
+  transactionInstallments   TransactionInstallment[]
+  categories                Category[]
+  subcategories             Subcategory[]
+  budgets                   Budget[]
+  goals                     Goal[]
+  goalContributions         GoalContribution[]
+  debts                     Debt[]
+  debtPayments              DebtPayment[]
+  notifications             Notification[]
+  notificationPreferences   NotificationPreference[]
+  attachments               Attachment[]
+  auditLogs                 AuditLog[]
+  consentRecords            ConsentRecord[]
+  dataExportRequests        DataExportRequest[]
+  securityEvents            SecurityEvent[]
+
+  @@index([email])
+  @@map("users")
+}
+
+// 2. UserProfile (Onboarding Financeiro e Preferências)
+model UserProfile {
+  id                        String            @id @default(uuid()) @db.Uuid
+  userId                    String            @unique @db.Uuid
+  user                      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  estimatedMonthlyIncomeCents BigInt          @default(0) // Armazenado em centavos ou criptografado
+  encryptedIncomeData       String?           @db.Text    // AES-256-GCM payload opcional
+  incomeType                IncomeType        @default(FIXED)
+  mainGoals                 String[]          // Ex: ["Reserva de Emergência", "Quitar Dívidas"]
+  fixedMonthlyExpensesCents BigInt            @default(0)
+  hasExistingDebts          Boolean           @default(false)
+  budgetControlMode         BudgetControlMode @default(INDIVIDUAL)
+  relevantCategories        String[]
+  onboardingCompleted       Boolean           @default(false)
+  onboardingSkipped         Boolean           @default(false)
+  themePreference           String            @default("system") @db.VarChar(20)
+  learnedCategoryRulesJson  String            @default("{}") @db.Text // Regras locais aprendidas do próprio usuário
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+
+  @@map("user_profiles")
+}
+
+// 3. Session (Controle de sessão com Refresh Token Rotation e Gestão de Dispositivos)
+model Session {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @db.Uuid
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessTokenJti      String    @unique @db.VarChar(64)
+  refreshTokenHash    String    @unique @db.VarChar(128)
+  refreshTokenFamily  String    @db.VarChar(64)
+  browser             String    @db.VarChar(120)
+  os                  String    @db.VarChar(80)
+  deviceName          String    @db.VarChar(120)
+  approximateLocation String    @db.VarChar(120) // Ex: "São Paulo, SP, Brasil" (sem GPS exato)
+  ipAddressMasked     String    @db.VarChar(45)  // Ex: "177.45.xxx.xxx" (Privacidade/LGPD)
+  mfaVerified         Boolean   @default(false)
+  isRevoked           Boolean   @default(false)
+  revokedReason       String?   @db.VarChar(120)
+  lastActiveAt        DateTime  @default(now())
+  expiresAt           DateTime
+  createdAt           DateTime  @default(now())
+
+  @@index([userId, isRevoked])
+  @@map("sessions")
+}
+
+// 4. MFAConfiguration (TOTP RFC 6238 + Backup Codes)
+model MFAConfiguration {
+  id                    String    @id @default(uuid()) @db.Uuid
+  userId                String    @unique @db.Uuid
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isEnabled             Boolean   @default(false)
+  encryptedTotpSecret   String    @db.Text // Criptografado em repouso com AES-256-GCM
+  backupCodesHashed     String[]  // Códigos de recuperação com hash
+  verifiedAt            DateTime?
+  lastUsedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("mfa_configurations")
+}
+
+// 5. Account (Contas Bancárias, Carteiras, Digitais, Investimentos, Empréstimos)
+model Account {
+  id                  String      @id @default(uuid()) @db.Uuid
+  userId              String      @db.Uuid
+  user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String      @db.VarChar(100)
+  type                AccountType
+  institutionName     String?     @db.VarChar(100)
+  initialBalanceCents BigInt      @default(0)
+  currentBalanceCents BigInt      @default(0)
+  color               String      @default("#0F766E") @db.VarChar(20)
+  icon                String      @default("wallet") @db.VarChar(40)
+  isArchived          Boolean     @default(false)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  originTransactions      Transaction[] @relation("OriginAccount")
+  destinationTransactions Transaction[] @relation("DestinationAccount")
+  goals                   Goal[]
+
+  @@index([userId, isArchived])
+  @@map("accounts")
+}
+
+// 6. CreditCard (Cartões de Crédito e Controle de Faturas)
+model CreditCard {
+  id                  String   @id @default(uuid()) @db.Uuid
+  userId              String   @db.Uuid
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String   @db.VarChar(100)
+  brand               String   @default("Mastercard") @db.VarChar(40)
+  lastFourDigits      String?  @db.VarChar(4)
+  totalLimitCents     BigInt
+  closingDay          Int      // 1 a 31
+  dueDay              Int      // 1 a 31
+  alertThresholdPct   Int      @default(80) // Alerta de uso elevado do limite
+  color               String   @default("#1E293B") @db.VarChar(20)
+  isArchived          Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  transactions        Transaction[]
+  installments        TransactionInstallment[]
+
+  @@index([userId, isArchived])
+  @@map("credit_cards")
+}
+
+// 7. Category
+model Category {
+  id          String         @id @default(uuid()) @db.Uuid
+  userId      String         @db.Uuid
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String         @db.VarChar(80)
+  slug        String         @db.VarChar(80)
+  type        TransactionType @default(EXPENSE)
+  icon        String         @default("tag") @db.VarChar(40)
+  color       String         @default("#0284C7") @db.VarChar(20)
+  isSystem    Boolean        @default(false)
+  isFixedCost Boolean        @default(false)
+  keywords    String[]       // Palavras-chave para classificação inteligente
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  subcategories Subcategory[]
+  transactions  Transaction[]
+  budgets       Budget[]
+
+  @@unique([userId, slug])
+  @@index([userId])
+  @@map("categories")
+}
+
+// 8. Subcategory
+model Subcategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId  String   @db.Uuid
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name        String   @db.VarChar(80)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@index([userId, categoryId])
+  @@map("subcategories")
+}
+
+// 9. Transaction
+model Transaction {
+  id                   String            @id @default(uuid()) @db.Uuid
+  userId               String            @db.Uuid
+  user                 User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type                 TransactionType
+  amountCents          BigInt
+  occurrenceDate       DateTime
+  dueDate              DateTime?
+  originAccountId      String?           @db.Uuid
+  originAccount        Account?          @relation("OriginAccount", fields: [originAccountId], references: [id], onDelete: SetNull)
+  destinationAccountId String?           @db.Uuid
+  destinationAccount   Account?          @relation("DestinationAccount", fields: [destinationAccountId], references: [id], onDelete: SetNull)
+  creditCardId         String?           @db.Uuid
+  creditCard           CreditCard?       @relation(fields: [creditCardId], references: [id], onDelete: SetNull)
+  categoryId           String            @db.Uuid
+  category             Category          @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  subcategoryId        String?           @db.Uuid
+  subcategory          Subcategory?      @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+  description          String            @db.VarChar(200)
+  paymentMethod        PaymentMethod     @default(PIX)
+  status               TransactionStatus @default(PAID)
+  recurrence           RecurrenceType    @default(ONCE)
+  recurrenceRule       String?           @db.VarChar(120)
+  installmentTotal     Int               @default(1)
+  tags                 String[]
+  notes                String?           @db.Text
+  autoClassified       Boolean           @default(false)
+  userCorrectedCat     Boolean           @default(false)
+  deletedAt            DateTime?         // Suporte para Desfazer Exclusão recente (Soft Delete temporário)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  installments         TransactionInstallment[]
+  attachments          Attachment[]
+
+  @@index([userId, occurrenceDate])
+  @@index([userId, categoryId])
+  @@index([userId, status])
+  @@map("transactions")
+}
+
+// 10. TransactionInstallment (Parcelamento de Compras)
+model TransactionInstallment {
+  id                String            @id @default(uuid()) @db.Uuid
+  userId            String            @db.Uuid
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactionId     String            @db.Uuid
+  transaction       Transaction       @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  creditCardId      String?           @db.Uuid
+  creditCard        CreditCard?       @relation(fields: [creditCardId], references: [id], onDelete: SetNull)
+  installmentNumber Int
+  totalInstallments Int
+  amountCents       BigInt
+  dueDate           DateTime
+  referenceMonth    String            @db.VarChar(7) // Formato YYYY-MM
+  status            TransactionStatus @default(PENDING)
+  paidAt            DateTime?
+  createdAt         DateTime          @default(now())
+
+  @@index([userId, referenceMonth])
+  @@index([transactionId])
+  @@map("transaction_installments")
+}
+
+// 11. Budget (Orçamentos Mensais por Categoria e Subcategoria)
+model Budget {
+  id                String       @id @default(uuid()) @db.Uuid
+  userId            String       @db.Uuid
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  categoryId        String       @db.Uuid
+  category          Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  subcategoryId     String?      @db.Uuid
+  subcategory       Subcategory? @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+  referenceMonth    String       @db.VarChar(7) // YYYY-MM
+  plannedAmountCents BigInt
+  alert50Sent       Boolean      @default(false)
+  alert80Sent       Boolean      @default(false)
+  alert100Sent      Boolean      @default(false)
+  alertExceededSent Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@unique([userId, categoryId, subcategoryId, referenceMonth])
+  @@index([userId, referenceMonth])
+  @@map("budgets")
+}
+
+// 12. Goal (Metas Financeiras)
+model Goal {
+  id                         String       @id @default(uuid()) @db.Uuid
+  userId                     String       @db.Uuid
+  user                       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId                  String?      @db.Uuid
+  account                    Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  name                       String       @db.VarChar(120)
+  targetAmountCents          BigInt
+  currentAmountCents         BigInt       @default(0)
+  targetDate                 DateTime
+  recurringContributionCents BigInt       @default(0)
+  priority                   GoalPriority @default(MEDIUM)
+  icon                       String       @default("target") @db.VarChar(40)
+  color                      String       @default("#10B981") @db.VarChar(20)
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @updatedAt
+
+  contributions              GoalContribution[]
+
+  @@index([userId])
+  @@map("goals")
+}
+
+// 13. GoalContribution (Aportes em Metas Financeiras)
+model GoalContribution {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goalId           String   @db.Uuid
+  goal             Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  amountCents      BigInt
+  contributionDate DateTime @default(now())
+  note             String?  @db.VarChar(200)
+  createdAt        DateTime @default(now())
+
+  @@index([userId, goalId])
+  @@map("goal_contributions")
+}
+
+// 14. Debt (Dívidas e Planejamento Financeiro)
+model Debt {
+  id                    String       @id @default(uuid()) @db.Uuid
+  userId                String       @db.Uuid
+  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                  String       @db.VarChar(120)
+  creditor              String       @db.VarChar(120)
+  totalAmountCents      BigInt
+  remainingAmountCents  BigInt
+  monthlyInterestRateBp Int          // Taxa mensal em basis points (ex: 199 = 1,99% a.m.)
+  totalInstallments     Int
+  paidInstallments      Int          @default(0)
+  installmentAmountCents BigInt
+  nextDueDate           DateTime
+  status                DebtStatus   @default(ACTIVE)
+  preferredStrategy     DebtStrategy @default(AVALANCHE)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  payments              DebtPayment[]
+
+  @@index([userId, status])
+  @@map("debts")
+}
+
+// 15. DebtPayment (Histórico de Pagamentos e Amortizações de Dívidas)
+model DebtPayment {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  debtId           String   @db.Uuid
+  debt             Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  amountCents      BigInt
+  isExtraAmortization Boolean @default(false)
+  paymentDate      DateTime @default(now())
+  note             String?  @db.VarChar(200)
+  createdAt        DateTime @default(now())
+
+  @@index([userId, debtId])
+  @@map("debt_payments")
+}
+
+// 16. Notification (Central de Alertas e Notificações)
+model Notification {
+  id          String           @id @default(uuid()) @db.Uuid
+  userId      String           @db.Uuid
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        NotificationType
+  title       String           @db.VarChar(140)
+  message     String           @db.Text
+  actionUrl   String?          @db.VarChar(255)
+  isRead      Boolean          @default(false)
+  readAt      DateTime?
+  sentByEmail Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+
+  @@index([userId, isRead, createdAt])
+  @@map("notifications")
+}
+
+// 17. NotificationPreference (Preferências de Alertas por Canal)
+model NotificationPreference {
+  id          String              @id @default(uuid()) @db.Uuid
+  userId      String              @db.Uuid
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        NotificationType
+  channel     NotificationChannel @default(BOTH)
+  isEnabled   Boolean             @default(true)
+  updatedAt   DateTime            @updatedAt
+
+  @@unique([userId, type])
+  @@map("notification_preferences")
+}
+
+// 18. Attachment (Anexos e Comprovantes em Object Storage Privado)
+model Attachment {
+  id                String      @id @default(uuid()) @db.Uuid
+  userId            String      @db.Uuid
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactionId     String      @db.Uuid
+  transaction       Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  fileName          String      @db.VarChar(255)
+  mimeType          String      @db.VarChar(80)
+  fileSizeBytes     Int
+  sha256Checksum    String      @db.VarChar(64)
+  storageObjectKey  String      @unique @db.VarChar(255) // Nunca público; acesso via URL assinada temporária
+  encryptedMetadata String?     @db.Text
+  createdAt         DateTime    @default(now())
+
+  @@index([userId, transactionId])
+  @@map("attachments")
+}
+
+// 19. AuditLog (Trilha de Auditoria Imutável de Ações Críticas)
+model AuditLog {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action          String   @db.VarChar(80) // LOGIN, LOGOUT, PASSWORD_CHANGE, MFA_ENABLE, DATA_EXPORT, ACCOUNT_DELETE, etc.
+  resourceType    String   @db.VarChar(60)
+  resourceId      String?  @db.VarChar(64)
+  ipAddressMasked String   @db.VarChar(45)
+  userAgent       String   @db.VarChar(255)
+  metadataSanitized String @default("{}") @db.Text // Sem segredos, senhas ou tokens
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+// 20. ConsentRecord (Registro de Consentimentos LGPD Granulares e Revogáveis)
+model ConsentRecord {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purposeCode    String    @db.VarChar(80) // TERMS_OF_USE, PRIVACY_POLICY, SECURITY_EMAILS, LOCAL_SMART_CATEGORIZATION
+  purposeTitle   String    @db.VarChar(160)
+  policyVersion  String    @db.VarChar(20)
+  granted        Boolean
+  grantedAt      DateTime  @default(now())
+  revokedAt      DateTime?
+  ipAddressMasked String   @db.VarChar(45)
+
+  @@index([userId, purposeCode])
+  @@map("consent_records")
+}
+
+// 21. DataExportRequest (Solicitações de Portabilidade e Exportação LGPD Art. 18)
+model DataExportRequest {
+  id               String       @id @default(uuid()) @db.Uuid
+  userId           String       @db.Uuid
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  format           ExportFormat @default(JSON)
+  status           ExportStatus @default(COMPLETED)
+  signedDownloadUrl String?     @db.Text
+  expiresAt        DateTime
+  requestedAt      DateTime     @default(now())
+  completedAt      DateTime?
+
+  @@index([userId, requestedAt])
+  @@map("data_export_requests")
+}
+
+// 22. SecurityEvent (Detecção de Anomalias, Força Bruta e Eventos de Segurança)
+model SecurityEvent {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String?          @db.Uuid
+  user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  eventType       String           @db.VarChar(80) // BRUTE_FORCE_BLOCKED, NEW_DEVICE_LOGIN, UNAUTHORIZED_ACCESS_ATTEMPT, CSRF_REJECTED
+  severity        SecuritySeverity @default(MEDIUM)
+  description     String           @db.Text
+  ipAddressMasked String           @db.VarChar(45)
+  resolved        Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+
+  @@index([userId, severity, createdAt])
+  @@map("security_events")
+}

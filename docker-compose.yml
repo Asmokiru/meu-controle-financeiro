@@ -1,0 +1,59 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mcf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mcf_app_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-DevLocalStrongPass2026!}
+      POSTGRES_DB: meu_controle_financeiro
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - mcf_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcf_app_user -d meu_controle_financeiro"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:7-alpine
+    container_name: mcf-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - mcf_redisdata:/data
+    security_opt:
+      - no-new-privileges:true
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcf-web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - .env.example
+    ports:
+      - "127.0.0.1:3000:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  mcf_pgdata:
+  mcf_redisdata:

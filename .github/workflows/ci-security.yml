@@ -1,0 +1,29 @@
+name: CI/CD Quality, Security & LGPD Compliance Pipeline
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+permissions:
+  contents: read
+
+jobs:
+  security-and-tests:
+    name: Lint, Type-Check, Supabase Secret Guard & Automated Security Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run Security Regression Guard (No Service Role / Secret Keys in Client, No NEXT_PUBLIC_ Secrets, RLS Enforced)
+        run: node --experimental-strip-types scripts/security-regression-check.ts
+
+      - name: Run Automated Test Suite (Multi-Tenant Isolation, Unauthenticated Blocking, Private Storage, Bundle & Leak Checks)
+        run: node --experimental-strip-types --test tests/platform.test.ts
