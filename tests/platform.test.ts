@@ -595,4 +595,64 @@ describe('Meu Controle Financeiro — Suíte Completa de Testes (Segurança, Iso
     assert.equal(deletion.purgedImmediately, true);
     assert.equal(store.users.has(user.id), false);
   });
+
+  it('10. Fluxo completo de Usuário Final: Criar Conta, Login, Recuperar Senha e Logout via API HTTP', async () => {
+    const store = new FinancialPlatformStore();
+    const controller = createAppController(store);
+
+    // 1. Acessa home sem cookie -> tela de login visível
+    const homeAnon = await controller.dispatch({ method: 'GET', url: '/' });
+    assert.equal(homeAnon.status, 200);
+    assert.ok(homeAnon.body.includes('id="auth-screen-overlay"'));
+    assert.ok(homeAnon.body.includes('style="display: flex;"'));
+
+    // 2. Cria uma conta nova pelo endpoint de cadastro
+    const regRes = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      body: {
+        name: 'Maria Clara Silva',
+        email: 'maria.clara@exemplo.com',
+        password: 'SenhaForte@2026',
+        acceptedTermsAndPrivacy: true,
+      },
+    });
+    assert.equal(regRes.status, 201);
+    const regData = JSON.parse(regRes.body);
+    assert.equal(regData.authenticated, true);
+    assert.equal(regData.state.user.email, 'maria.clara@exemplo.com');
+    const setCookieHeader = regRes.headers['Set-Cookie'] || '';
+    assert.ok(setCookieHeader.includes('mcf_session='));
+    assert.ok(setCookieHeader.includes('mcf_vault='));
+
+    // 3. Redefine a senha e faz login com a nova senha
+    const resetRes = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/reset-password',
+      body: {
+        email: 'maria.clara@exemplo.com',
+        newPassword: 'NovaSenhaSuper@2026',
+      },
+    });
+    assert.equal(resetRes.status, 200);
+
+    const loginRes = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      body: {
+        email: 'maria.clara@exemplo.com',
+        password: 'NovaSenhaSuper@2026',
+      },
+    });
+    assert.equal(loginRes.status, 200);
+    const loginData = JSON.parse(loginRes.body);
+    assert.equal(loginData.authenticated, true);
+
+    // 4. Logout limpa a sessão
+    const logoutRes = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+    });
+    assert.equal(logoutRes.status, 200);
+  });
 });

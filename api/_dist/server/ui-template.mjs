@@ -1161,12 +1161,164 @@ export function renderWebAppHtml(initialState     , csrfToken        )         {
       .content-container { padding: 20px; }
       .grid-2 { grid-template-columns: 1fr; }
     }
+
+    /* Tela de Autenticação do Usuário Final (Login / Criar Conta / Recuperar Senha) */
+    .auth-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 4500;
+      background: radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 55%), var(--bg-app);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      overflow-y: auto;
+    }
+    .auth-card {
+      width: 100%;
+      max-width: 460px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 32px;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.14);
+    }
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      padding: 5px;
+      background: var(--bg-muted);
+      border-radius: 12px;
+      margin-bottom: 22px;
+    }
+    .auth-tab-btn {
+      padding: 8px 10px;
+      border-radius: 9px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 0.84rem;
+      cursor: pointer;
+      transition: all var(--transition-fast);
+    }
+    .auth-tab-btn[aria-selected="true"] {
+      background: var(--bg-surface);
+      color: var(--brand-primary);
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+    }
+    .auth-error-msg {
+      padding: 11px 14px;
+      border-radius: 10px;
+      background: var(--color-danger-bg);
+      color: var(--color-danger);
+      font-size: 0.84rem;
+      font-weight: 600;
+      margin-bottom: 14px;
+      display: none;
+    }
+    .auth-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 18px 0;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+    }
+    .auth-divider::before, .auth-divider::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border-color);
+    }
   </style>
 </head>
 <body>
   <a href="#main-content" class="skip-link">Pular para o conteúdo principal</a>
 
   <div id="toast-feedback" class="toast-feedback" role="status" aria-live="polite"></div>
+
+  <!-- Tela de Login / Cadastro / Recuperação do Usuário Final -->
+  <div id="auth-screen-overlay" class="auth-overlay" style="display: ${initialState?.isAuthenticated ? 'none' : 'flex'};" role="dialog" aria-modal="true" aria-labelledby="auth-dialog-title">
+    <div class="auth-card">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;">
+        <div class="brand-logo" style="width:42px;height:42px;font-size:1rem;">MC</div>
+        <div>
+          <h2 id="auth-dialog-title" style="font-size:1.2rem;font-weight:700;color:var(--text-primary);letter-spacing:-0.02em;">Meu Controle Financeiro</h2>
+          <p class="text-aux">Acesse sua conta pessoal ou crie seu cadastro gratuito</p>
+        </div>
+      </div>
+
+      <div class="auth-tabs" role="tablist" aria-label="Opções de acesso">
+        <button type="button" class="auth-tab-btn" role="tab" aria-selected="true" data-action="switch-auth-tab" data-auth-tab="login">Entrar</button>
+        <button type="button" class="auth-tab-btn" role="tab" aria-selected="false" data-action="switch-auth-tab" data-auth-tab="register">Criar conta</button>
+        <button type="button" class="auth-tab-btn" role="tab" aria-selected="false" data-action="switch-auth-tab" data-auth-tab="reset">Recuperar</button>
+      </div>
+
+      <div id="auth-error-box" class="auth-error-msg" role="alert"></div>
+
+      <!-- Formulário 1: Entrar (Login) -->
+      <form id="auth-form-login" data-form="auth-login">
+        <div class="form-group">
+          <label for="login-email">Seu e-mail</label>
+          <input id="login-email" type="email" class="input" required placeholder="seuemail@exemplo.com" autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Sua senha</label>
+          <input id="login-password" type="password" class="input" required placeholder="••••••••••" autocomplete="current-password" />
+        </div>
+        <div id="login-mfa-group" class="form-group" style="display:none;">
+          <label for="login-totp">Código 2FA (Autenticador TOTP de 6 dígitos)</label>
+          <input id="login-totp" type="text" class="input" placeholder="000000" maxlength="8" />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;padding:11px;">Entrar na minha conta</button>
+
+        <div class="auth-divider">ou experimente com dados preenchidos</div>
+        <button type="button" class="btn" style="width:100%;" data-action="demo-login">${LUCIDE_ICONS.shieldCheck}<span>Entrar com Conta Demonstração (Mariana Costa)</span></button>
+      </form>
+
+      <!-- Formulário 2: Criar Conta (Cadastro de Usuário Final) -->
+      <form id="auth-form-register" data-form="auth-register" style="display:none;">
+        <div class="form-group">
+          <label for="reg-name">Seu nome completo</label>
+          <input id="reg-name" type="text" class="input" required placeholder="Ex: Fernando Mendes" autocomplete="name" />
+        </div>
+        <div class="form-group">
+          <label for="reg-email">Seu melhor e-mail</label>
+          <input id="reg-email" type="email" class="input" required placeholder="seuemail@exemplo.com" autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label for="reg-password">Crie uma senha forte</label>
+          <input id="reg-password" type="password" class="input" required placeholder="Mín. 10 caracteres, maiúscula, número e símbolo" autocomplete="new-password" />
+          <span class="text-aux" style="display:block;margin-top:4px;font-size:0.76rem;">Requisitos OWASP: mín. 10 caracteres, 1 maiúscula, 1 minúscula, 1 número e 1 símbolo (ex: <code>MinhaSenha@2026!</code>).</span>
+        </div>
+        <div class="form-group" style="display:flex;align-items:flex-start;gap:8px;margin-top:10px;">
+          <input id="reg-terms" type="checkbox" required checked style="width:auto;margin-top:3px;" />
+          <label for="reg-terms" style="font-weight:400;font-size:0.8rem;color:var(--text-secondary);">Aceito os Termos de Uso e a Política de Privacidade (LGPD — Lei nº 13.709/2018) com isolamento individual de dados.</label>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;padding:11px;">Criar minha conta e acessar</button>
+      </form>
+
+      <!-- Formulário 3: Recuperar Senha -->
+      <form id="auth-form-reset" data-form="auth-reset" style="display:none;">
+        <div class="form-group">
+          <label for="reset-email">E-mail cadastrado</label>
+          <input id="reset-email" type="email" class="input" required placeholder="seuemail@exemplo.com" />
+        </div>
+        <div class="form-group">
+          <label for="reset-new-password">Nova senha forte</label>
+          <input id="reset-new-password" type="password" class="input" required placeholder="Mín. 10 caracteres, maiúscula, número e símbolo" />
+        </div>
+        <button type="submit" class="btn btn-primary" style="width:100%;padding:11px;">Redefinir minha senha</button>
+      </form>
+
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border-color);display:flex;justify-content:space-between;align-items:center;font-size:0.76rem;color:var(--text-muted);">
+        <span>Protegido por Argon2id + AES-256-GCM</span>
+        <span>RLS & LGPD Ativos</span>
+      </div>
+    </div>
+  </div>
 
   <div class="app-shell">
     <!-- Sidebar Fixa, Elegante e Compacta com Lucide Icons -->
@@ -1223,6 +1375,7 @@ export function renderWebAppHtml(initialState     , csrfToken        )         {
           </div>
           <button type="button" class="btn" data-action="toggle-theme" id="theme-toggle-btn" aria-label="Alternar entre modo claro e escuro">${LUCIDE_ICONS.moon}<span>Modo escuro</span></button>
           <button type="button" class="btn btn-primary" data-nav-tab="transactions">${LUCIDE_ICONS.plus}<span>Nova movimentação</span></button>
+          <button type="button" class="btn" data-action="logout" title="Sair da conta atual ou trocar de usuário">${LUCIDE_ICONS.user}<span>Sair / Trocar conta</span></button>
         </div>
       </header>
 
@@ -1334,8 +1487,47 @@ export function renderWebAppHtml(initialState     , csrfToken        )         {
       var res = await fetch("/api/v1/state");
       if (res.ok) {
         appState = await res.json();
+        updateHeaderUserIdentity();
         renderCurrentTab();
       }
+    }
+
+    function updateHeaderUserIdentity() {
+      if (!appState || !appState.user) return;
+      var firstName = (appState.user.name || "Usuário").split(" ")[0];
+      var headingEl = document.getElementById("page-heading");
+      if (headingEl) {
+        headingEl.textContent = "Olá, " + firstName + " — Meu Controle Financeiro";
+      }
+      var welcomeEl = document.getElementById("user-welcome-label");
+      if (welcomeEl) {
+        welcomeEl.textContent = appState.user.email + " • Visão consolidada da sua saúde financeira";
+      }
+    }
+
+    function switchAuthTab(tabName) {
+      var errBox = document.getElementById("auth-error-box");
+      if (errBox) errBox.style.display = "none";
+      var btns = document.querySelectorAll("[data-auth-tab]");
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].setAttribute(
+          "aria-selected",
+          btns[i].getAttribute("data-auth-tab") === tabName ? "true" : "false"
+        );
+      }
+      var fLogin = document.getElementById("auth-form-login");
+      var fReg = document.getElementById("auth-form-register");
+      var fReset = document.getElementById("auth-form-reset");
+      if (fLogin) fLogin.style.display = tabName === "login" ? "block" : "none";
+      if (fReg) fReg.style.display = tabName === "register" ? "block" : "none";
+      if (fReset) fReset.style.display = tabName === "reset" ? "block" : "none";
+    }
+
+    function showAuthError(msg) {
+      var errBox = document.getElementById("auth-error-box");
+      if (!errBox) return;
+      errBox.textContent = msg;
+      errBox.style.display = "block";
     }
 
     function renderCurrentTab() {
@@ -1952,6 +2144,30 @@ export function renderWebAppHtml(initialState     , csrfToken        )         {
 
       if (action === "toggle-theme") {
         toggleTheme();
+      } else if (action === "switch-auth-tab") {
+        switchAuthTab(actionBtn.getAttribute("data-auth-tab") || "login");
+      } else if (action === "demo-login") {
+        var demoRes = await fetch("/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ demo: true })
+        });
+        var demoData = await demoRes.json();
+        if (demoRes.ok && demoData.authenticated) {
+          window.__CSRF_TOKEN__ = demoData.csrfToken;
+          appState = demoData.state;
+          var overlay = document.getElementById("auth-screen-overlay");
+          if (overlay) overlay.style.display = "none";
+          updateHeaderUserIdentity();
+          renderCurrentTab();
+          showToast("Sessão iniciada na Conta Demonstração!");
+        }
+      } else if (action === "logout") {
+        await fetch("/api/v1/auth/logout", { method: "POST" });
+        var authOverlay = document.getElementById("auth-screen-overlay");
+        if (authOverlay) authOverlay.style.display = "flex";
+        switchAuthTab("login");
+        showToast("Você saiu da conta com segurança.");
       } else if (action === "open-history-modal") {
         isHistoryMaximized = true;
         renderCurrentTab();
@@ -2052,7 +2268,74 @@ export function renderWebAppHtml(initialState     , csrfToken        )         {
       e.preventDefault();
       var formType = form.getAttribute("data-form");
 
-      if (formType === "create-transaction") {
+      if (formType === "auth-login") {
+        var loginRes = await fetch("/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: document.getElementById("login-email").value,
+            password: document.getElementById("login-password").value,
+            totpCode: document.getElementById("login-totp").value || undefined
+          })
+        });
+        var loginData = await loginRes.json();
+        if (loginRes.ok && loginData.requiresMfa) {
+          var mfaGrp = document.getElementById("login-mfa-group");
+          if (mfaGrp) mfaGrp.style.display = "block";
+          showAuthError("Informe o código de 6 dígitos do seu aplicativo autenticador (2FA).");
+          return;
+        }
+        if (!loginRes.ok || !loginData.authenticated) {
+          showAuthError(loginData.error || "Não foi possível entrar. Verifique seu e-mail e senha.");
+          return;
+        }
+        window.__CSRF_TOKEN__ = loginData.csrfToken;
+        appState = loginData.state;
+        var overlayEl = document.getElementById("auth-screen-overlay");
+        if (overlayEl) overlayEl.style.display = "none";
+        updateHeaderUserIdentity();
+        renderCurrentTab();
+        showToast("Bem-vindo(a), " + appState.user.name + "!");
+      } else if (formType === "auth-register") {
+        var regRes = await fetch("/api/v1/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: document.getElementById("reg-name").value,
+            email: document.getElementById("reg-email").value,
+            password: document.getElementById("reg-password").value,
+            acceptedTermsAndPrivacy: document.getElementById("reg-terms").checked
+          })
+        });
+        var regData = await regRes.json();
+        if (!regRes.ok || !regData.authenticated) {
+          showAuthError(regData.error || "Verifique os dados informados para criar sua conta.");
+          return;
+        }
+        window.__CSRF_TOKEN__ = regData.csrfToken;
+        appState = regData.state;
+        var regOverlayEl = document.getElementById("auth-screen-overlay");
+        if (regOverlayEl) regOverlayEl.style.display = "none";
+        updateHeaderUserIdentity();
+        renderCurrentTab();
+        showToast("Conta criada com sucesso! Bem-vindo(a), " + appState.user.name + "!");
+      } else if (formType === "auth-reset") {
+        var rstRes = await fetch("/api/v1/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: document.getElementById("reset-email").value,
+            newPassword: document.getElementById("reset-new-password").value
+          })
+        });
+        var rstData = await rstRes.json();
+        if (!rstRes.ok) {
+          showAuthError(rstData.error || "Não foi possível redefinir a senha.");
+          return;
+        }
+        switchAuthTab("login");
+        showToast(rstData.message || "Senha redefinida! Faça login com a nova senha.");
+      } else if (formType === "create-transaction") {
         var amountReais = parseFloat(document.getElementById("tx-amount").value || "0");
         var payload = {
           description: document.getElementById("tx-desc").value,

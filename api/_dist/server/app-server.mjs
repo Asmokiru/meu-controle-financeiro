@@ -16,6 +16,8 @@ import {
   sanitizeText,
 } from '../lib/security/headers-and-guards.mjs';
 import {
+  encryptAtRest,
+  decryptAtRest,
   hashToken,
   maskSensitiveStrings,
   verifySignedAttachmentUrl,
@@ -103,9 +105,109 @@ export function createAppController(
     };
   }
 
+  function createEncryptedSessionCookieValue(
+    userId        ,
+    sessionId        
+  )         {
+    const u = store.users.get(userId);
+    if (!u) return '';
+    return encryptAtRest(
+      JSON.stringify({
+        sessionId,
+        userId: u.id,
+        name: u.name,
+        email: u.email,
+        passwordHash: u.passwordHash,
+        isDemoAccount: u.isDemoAccount,
+      })
+    );
+  }
+
+  function tryRestoreSessionFromCookie(cookieHeader        )   
+                   
+                      
+           {
+    const vaultMatch = cookieHeader.match(/mcf_vault=([^;\s]+)/);
+    if (!vaultMatch) return null;
+    try {
+      const raw = decodeURIComponent(vaultMatch[1].trim());
+      const parsed = JSON.parse(decryptAtRest(raw));
+      if (!parsed || !parsed.userId || !parsed.sessionId) return null;
+
+      if (!store.users.has(parsed.userId)) {
+        const now = new Date().toISOString();
+        store.users.set(parsed.userId, {
+          id: parsed.userId,
+          name: parsed.name || 'Usuário',
+          email: parsed.email || 'usuario@local',
+          passwordHash: parsed.passwordHash || '',
+          emailVerified: true,
+          emailVerificationToken: null,
+          emailVerificationExpires: null,
+          passwordResetTokenHash: null,
+          passwordResetExpires: null,
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+          deletionRequestedAt: null,
+          deletionScheduledFor: null,
+          isDemoAccount: Boolean(parsed.isDemoAccount),
+          createdAt: now,
+          updatedAt: now,
+        });
+        store.userProfiles.set(parsed.userId, {
+          id: crypto.randomUUID(),
+          userId: parsed.userId,
+          estimatedMonthlyIncomeCents: 0,
+          encryptedIncomeData: encryptAtRest(
+            JSON.stringify({ estimatedMonthlyIncomeCents: 0 })
+          ),
+          incomeType: 'FIXED',
+          mainGoals: [],
+          fixedMonthlyExpensesCents: 0,
+          hasExistingDebts: false,
+          budgetControlMode: 'INDIVIDUAL',
+          relevantCategories: [],
+          onboardingCompleted: false,
+          onboardingSkipped: false,
+          themePreference: 'system',
+          learnedCategoryRulesJson: '{}',
+          createdAt: now,
+          updatedAt: now,
+        });
+        (store       ).seedInitialCategoriesForUser?.(parsed.userId);
+      }
+
+      if (!store.sessions.has(parsed.sessionId)) {
+        const now = new Date().toISOString();
+        store.sessions.set(parsed.sessionId, {
+          id: parsed.sessionId,
+          userId: parsed.userId,
+          accessTokenJti: parsed.sessionId,
+          refreshTokenHash: parsed.sessionId,
+          refreshTokenFamily: parsed.sessionId,
+          browser: 'Navegador Web',
+          os: 'Cloud Session',
+          deviceName: 'Sessão Autenticada',
+          approximateLocation: 'Brasil',
+          ipAddressMasked: '177.0.xxx.xxx',
+          mfaVerified: false,
+          isRevoked: false,
+          revokedReason: null,
+          lastActiveAt: now,
+          expiresAt: new Date(Date.now() + 7 * 24 * 3600_000).toISOString(),
+          createdAt: now,
+        });
+      }
+
+      return { userId: parsed.userId, sessionId: parsed.sessionId };
+    } catch {
+      return null;
+    }
+  }
+
   function resolveAuthenticatedActor(
     reqHeaders                                    
-  )                                        {
+  )                                                                    {
     const unauthHeader =
       reqHeaders['x-unauthenticated'] || reqHeaders['X-Unauthenticated'];
     if (unauthHeader === 'true' || unauthHeader === '1') {
@@ -128,19 +230,34 @@ export function createAppController(
       if (!matchedSession) {
         throw new AuthenticationError('Token de acesso inválido, revogado ou expirado.');
       }
-      return { userId: matchedSession.userId, sessionId: matchedSession.id };
+      return {
+        userId: matchedSession.userId,
+        sessionId: matchedSession.id,
+        hasExplicitCookie: true,
+      };
     }
 
     const cookieHeader = reqHeaders['cookie'] || reqHeaders['Cookie'] || '';
     if (cookieHeader) {
-      const match = cookieHeader.match(/__Host-mcf-session=([^;\s]+)/);
+      const restored = tryRestoreSessionFromCookie(cookieHeader);
+      if (restored) {
+        return { ...restored, hasExplicitCookie: true };
+      }
+
+      const match =
+        cookieHeader.match(/mcf_session=([^;\s]+)/) ||
+        cookieHeader.match(/__Host-mcf-session=([^;\s]+)/);
       if (match) {
         const sid = match[1].trim();
         const session = store.sessions.get(sid);
         if (!session || session.isRevoked) {
           throw new AuthenticationError('Sessão inválida ou expirada.');
         }
-        return { userId: session.userId, sessionId: session.id };
+        return {
+          userId: session.userId,
+          sessionId: session.id,
+          hasExplicitCookie: true,
+        };
       }
     }
 
@@ -150,7 +267,11 @@ export function createAppController(
       );
     }
 
-    return { userId: demoUserId, sessionId: demoSessionId };
+    return {
+      userId: demoUserId,
+      sessionId: demoSessionId,
+      hasExplicitCookie: false,
+    };
   }
 
   function verifyAdminAuthorization(
@@ -330,16 +451,165 @@ export function createAppController(
         }
       }
 
+      // Rotas públicas de Autenticação de Usuário Final (Login, Cadastro, Logout e Recuperação de Senha)
+      const reqBody = params.body || {};
+
+      if (method === 'POST' && pathname === '/api/v1/auth/register') {
+        const regRes = store.registerUser({
+          name: sanitizeText(reqBody.name || '', 120),
+          email: String(reqBody.email || '').trim().toLowerCase(),
+          password: String(reqBody.password || ''),
+          acceptedTermsAndPrivacy: Boolean(reqBody.acceptedTermsAndPrivacy),
+          ip: clientIp,
+        });
+        store.verifyEmail(regRes.verificationToken);
+        const loginRes = store.login({
+          email: regRes.user.email,
+          password: String(reqBody.password || ''),
+          browser: String(reqHeaders['user-agent'] || 'Navegador Web').slice(0, 60),
+          os: 'Web',
+          deviceName: 'Dispositivo Pessoal',
+          approximateLocation: 'Brasil',
+          ip: clientIp,
+        });
+        const sid = loginRes.session .id;
+        const csrfToken = generateCsrfToken(sid);
+        const vault = encodeURIComponent(
+          createEncryptedSessionCookieValue(regRes.user.id, sid)
+        );
+        return {
+          status: 201,
+          headers: {
+            ...secHeaders,
+            'Set-Cookie': `mcf_session=${sid}; Path=/; HttpOnly; SameSite=Lax, mcf_vault=${vault}; Path=/; HttpOnly; SameSite=Lax`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify({
+            authenticated: true,
+            csrfToken,
+            state: buildClientState(regRes.user.id),
+          }),
+        };
+      }
+
+      if (method === 'POST' && pathname === '/api/v1/auth/login') {
+        const isDemoLogin = Boolean(reqBody.demo);
+        const emailToUse = isDemoLogin
+          ? DEMO_USER_CREDENTIALS.email
+          : String(reqBody.email || '').trim().toLowerCase();
+        const passwordToUse = isDemoLogin
+          ? DEMO_USER_CREDENTIALS.password
+          : String(reqBody.password || '');
+
+        const loginRes = store.login({
+          email: emailToUse,
+          password: passwordToUse,
+          totpCode: reqBody.totpCode ? String(reqBody.totpCode) : undefined,
+          browser: String(reqHeaders['user-agent'] || 'Navegador Web').slice(0, 60),
+          os: 'Web',
+          deviceName: isDemoLogin ? 'Sessão Demonstração [DEMO]' : 'Dispositivo Pessoal',
+          approximateLocation: 'Brasil',
+          ip: clientIp,
+        });
+
+        if (loginRes.requiresMfa) {
+          return {
+            status: 200,
+            headers: {
+              ...secHeaders,
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: JSON.stringify({
+              authenticated: false,
+              requiresMfa: true,
+            }),
+          };
+        }
+
+        const sid = loginRes.session .id;
+        const uid = loginRes.user .id;
+        const csrfToken = generateCsrfToken(sid);
+        const vault = encodeURIComponent(
+          createEncryptedSessionCookieValue(uid, sid)
+        );
+        return {
+          status: 200,
+          headers: {
+            ...secHeaders,
+            'Set-Cookie': `mcf_session=${sid}; Path=/; HttpOnly; SameSite=Lax, mcf_vault=${vault}; Path=/; HttpOnly; SameSite=Lax`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify({
+            authenticated: true,
+            csrfToken,
+            state: buildClientState(uid),
+          }),
+        };
+      }
+
+      if (method === 'POST' && pathname === '/api/v1/auth/logout') {
+        return {
+          status: 200,
+          headers: {
+            ...secHeaders,
+            'Set-Cookie':
+              'mcf_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax, mcf_vault=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax',
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify({ authenticated: false }),
+        };
+      }
+
+      if (method === 'POST' && pathname === '/api/v1/auth/reset-password') {
+        const email = String(reqBody.email || '').trim().toLowerCase();
+        const newPassword = String(reqBody.newPassword || '');
+        const { resetToken } = store.requestPasswordReset(email);
+        if (!resetToken) {
+          throw new AuthenticationError(
+            'Não encontramos uma conta ativa com este e-mail nesta sessão.'
+          );
+        }
+        store.resetPasswordWithToken({ token: resetToken, newPassword });
+        return {
+          status: 200,
+          headers: {
+            ...secHeaders,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify({
+            reset: true,
+            message: 'Senha redefinida com sucesso! Faça login com sua nova senha.',
+          }),
+        };
+      }
+
       // Página Principal (Interface Web Completa)
       if (method === 'GET' && pathname === '/') {
-        const csrfToken = generateCsrfToken(demoSessionId);
-        const clientState = buildClientState(demoUserId);
+        let activeUserId = demoUserId;
+        let activeSessionId = demoSessionId;
+        let isAuthenticatedCookie = false;
+
+        try {
+          const resolved = resolveAuthenticatedActor(reqHeaders);
+          activeUserId = resolved.userId;
+          activeSessionId = resolved.sessionId;
+          isAuthenticatedCookie = resolved.hasExplicitCookie;
+        } catch {
+          activeUserId = demoUserId;
+          activeSessionId = demoSessionId;
+          isAuthenticatedCookie = false;
+        }
+
+        const csrfToken = generateCsrfToken(activeSessionId);
+        const clientState = {
+          ...buildClientState(activeUserId),
+          isAuthenticated: isAuthenticatedCookie,
+        };
         const html = renderWebAppHtml(clientState, csrfToken);
         return {
           status: 200,
           headers: {
             ...secHeaders,
-            'Set-Cookie': `__Host-mcf-session=${demoSessionId}; Path=/; HttpOnly; SameSite=Strict`,
             'Content-Type': 'text/html; charset=utf-8',
           },
           body: html,
