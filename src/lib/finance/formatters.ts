@@ -36,3 +36,20 @@ export function formatDateBR(dateInput: string | Date): string {
   const year = date.getUTCFullYear();
   return `${day}/${month}/${year}`;
 }
+
+/**
+ * Formata porcentagem para exibição visual no padrão brasileiro com vírgula decimal (ex: 23.9 -> "23,9%").
+ */
+export function formatPercentBR(value: number): string {
+  const num = Number(value) || 0;
+  const rounded = Math.round(num * 10) / 10;
+  return `${String(rounded).replace('.', ',')}%`;
+}
+
+/**
+ * Pluralização dinâmica de meses em português ("1 mês" no singular e "X meses" no plural).
+ */
+export function formatMonths(n: number): string {
+  const count = Math.max(0, Math.round(Number(n) || 0));
+  return count === 1 ? '1 mês' : `${count} meses`;
+}

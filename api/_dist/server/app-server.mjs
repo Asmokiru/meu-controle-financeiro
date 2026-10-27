@@ -71,12 +71,18 @@ export function createAppController(
     const profile = store.userProfiles.get(userId);
     const dashboard = store.getDashboardSummary(userId, '2026-10');
     const accounts = store.getUserAccounts(userId);
+    const creditCards = Array.from(store.creditCards.values()).filter(
+      (cc) => cc.userId === userId && !cc.isArchived
+    );
     const categories = Array.from(store.categories.values()).filter(
       (c) => c.userId === userId
     );
     const transactions = store.getUserTransactions(userId);
     const budgets = store.getUserBudgets(userId);
     const goals = store.getUserGoals(userId);
+    const debts = Array.from(store.debts.values()).filter(
+      (d) => d.userId === userId
+    );
     const attachments = store.getUserAttachments(userId);
     const sessions = store.getUserSessions(userId);
     const consents = Array.from(store.consentRecords.values()).filter(
@@ -93,10 +99,12 @@ export function createAppController(
       profile,
       dashboard,
       accounts,
+      creditCards,
       categories,
       transactions,
       budgets,
       goals,
+      debts,
       attachments,
       sessions,
       consents,
@@ -547,6 +555,45 @@ export function createAppController(
         };
       }
 
+      if (method === 'POST' && pathname === '/api/v1/auth/hydrate') {
+        if (!reqBody.user || !reqBody.user.id || !reqBody.user.email) {
+          throw new ValidationError('Dados de hidratação de sessão inválidos.');
+        }
+        const { userId: hydratedUid, sessionId: hydratedSid } =
+          store.hydrateUserFinancialState({
+            user: {
+              id: sanitizeText(String(reqBody.user.id), 80),
+              name: sanitizeText(String(reqBody.user.name || reqBody.user.nome || 'Usuário'), 120),
+              email: String(reqBody.user.email).trim().toLowerCase(),
+              createdAt: reqBody.user.createdAt,
+            },
+            accounts: Array.isArray(reqBody.accounts) ? reqBody.accounts : undefined,
+            creditCards: Array.isArray(reqBody.creditCards) ? reqBody.creditCards : undefined,
+            categories: Array.isArray(reqBody.categories) ? reqBody.categories : undefined,
+            transactions: Array.isArray(reqBody.transactions) ? reqBody.transactions : undefined,
+            budgets: Array.isArray(reqBody.budgets) ? reqBody.budgets : undefined,
+            goals: Array.isArray(reqBody.goals) ? reqBody.goals : undefined,
+            debts: Array.isArray(reqBody.debts) ? reqBody.debts : undefined,
+          });
+        const csrfToken = generateCsrfToken(hydratedSid);
+        const vault = encodeURIComponent(
+          createEncryptedSessionCookieValue(hydratedUid, hydratedSid)
+        );
+        return {
+          status: 200,
+          headers: {
+            ...secHeaders,
+            'Set-Cookie': `mcf_session=${hydratedSid}; Path=/; HttpOnly; SameSite=Lax, mcf_vault=${vault}; Path=/; HttpOnly; SameSite=Lax`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify({
+            authenticated: true,
+            csrfToken,
+            state: buildClientState(hydratedUid),
+          }),
+        };
+      }
+
       if (method === 'POST' && pathname === '/api/v1/auth/logout') {
         return {
           status: 200,
@@ -583,28 +630,46 @@ export function createAppController(
         };
       }
 
-      // Página Principal (Interface Web Completa)
+      // Página Principal (Interface Web Completa com Auth Guard de DOM)
       if (method === 'GET' && pathname === '/') {
-        let activeUserId = demoUserId;
+        let activeUserId = '';
         let activeSessionId = demoSessionId;
         let isAuthenticatedCookie = false;
 
         try {
           const resolved = resolveAuthenticatedActor(reqHeaders);
-          activeUserId = resolved.userId;
-          activeSessionId = resolved.sessionId;
-          isAuthenticatedCookie = resolved.hasExplicitCookie;
+          if (resolved.hasExplicitCookie) {
+            activeUserId = resolved.userId;
+            activeSessionId = resolved.sessionId;
+            isAuthenticatedCookie = true;
+          }
         } catch {
-          activeUserId = demoUserId;
-          activeSessionId = demoSessionId;
           isAuthenticatedCookie = false;
         }
 
         const csrfToken = generateCsrfToken(activeSessionId);
-        const clientState = {
-          ...buildClientState(activeUserId),
-          isAuthenticated: isAuthenticatedCookie,
-        };
+        const clientState =
+          isAuthenticatedCookie && activeUserId
+            ? {
+                ...buildClientState(activeUserId),
+                isAuthenticated: true,
+              }
+            : {
+                isAuthenticated: false,
+                user: null,
+                profile: null,
+                dashboard: null,
+                accounts: [],
+                categories: [],
+                transactions: [],
+                budgets: [],
+                goals: [],
+                debts: [],
+                notifications: [],
+                sessions: [],
+                consents: [],
+                auditLogs: [],
+              };
         const html = renderWebAppHtml(clientState, csrfToken);
         return {
           status: 200,

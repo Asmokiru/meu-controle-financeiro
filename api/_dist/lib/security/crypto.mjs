@@ -64,8 +64,8 @@ export function validatePasswordStrength(password        )
                    
   {
   const errors           = [];
-  if (!password || password.length < 10) {
-    errors.push('A senha deve ter pelo menos 10 caracteres.');
+  if (!password || password.length < 8) {
+    errors.push('A senha deve ter pelo menos 8 caracteres.');
   }
   if (!/[A-Z]/.test(password)) {
     errors.push('A senha deve conter pelo menos uma letra maiúscula.');

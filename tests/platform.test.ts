@@ -548,7 +548,7 @@ describe('Meu Controle Financeiro — Suíte Completa de Testes (Segurança, Iso
   it('9. Validação de Magic Bytes de Comprovantes e Portabilidade/Exclusão LGPD', () => {
     const store = new FinancialPlatformStore();
     const { user } = store.registerUser({
-      name: 'Titular LGPD [DEMO]',
+      name: 'Titular LGPD',
       email: 'lgpd@ficticio.local',
       password: 'SenhaLgpd@2026!',
       acceptedTermsAndPrivacy: true,
@@ -654,5 +654,186 @@ describe('Meu Controle Financeiro — Suíte Completa de Testes (Segurança, Iso
       url: '/api/v1/auth/logout',
     });
     assert.equal(logoutRes.status, 200);
+  });
+
+  it('11. Critérios de Aceite: Persistência de Contas (Hidratação), Auth Guard no DOM, Matemática Financeira Real e Formatação pt-BR/A11y', async () => {
+    const store = new FinancialPlatformStore();
+    const controller = createAppController(store);
+
+    // Critério 2 & 5: DOM inicial (GET / sem autenticação) NÃO renderiza Dashboard nem dados da Mariana nem toast fantasma
+    const anonHome = await controller.dispatch({ method: 'GET', url: '/' });
+    assert.equal(anonHome.status, 200);
+    const initialDomMarkup = anonHome.body.split('<script id="app-client-script">')[0];
+    assert.ok(initialDomMarkup.includes('role="dialog"'));
+    assert.ok(initialDomMarkup.includes('aria-modal="true"'));
+    assert.ok(initialDomMarkup.includes('aria-labelledby="auth-dialog-title"'));
+    assert.ok(initialDomMarkup.includes('Testar Conta Demonstração'));
+    assert.ok(initialDomMarkup.includes('id="app-protected-shell" inert hidden'));
+    assert.equal(
+      initialDomMarkup.includes('<aside class="sidebar"'),
+      false,
+      'A sidebar do Dashboard não deve estar no HTML inicial quando deslogado'
+    );
+    assert.equal(
+      anonHome.body.includes('Mariana Costa'),
+      false,
+      'Dados da Mariana não devem vazar no HTML inicial de usuário não autenticado'
+    );
+    assert.equal(
+      initialDomMarkup.includes('Movimentação excluída.'),
+      false,
+      'O toast fantasma "Movimentação excluída." não deve existir no HTML inicial'
+    );
+
+    // Critério 1: Criar conta (teste@exemplo.com / Senha@123) -> adicionar receita de R$ 500,00 -> Logout -> Re-hidratar em nova instância -> saldo R$ 500,00 preservado
+    const regRes = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      body: {
+        name: 'Usuário Teste Real',
+        email: 'teste@exemplo.com',
+        password: 'Senha@123',
+        acceptedTermsAndPrivacy: true,
+      },
+    });
+    assert.equal(regRes.status, 201);
+    const regData = JSON.parse(regRes.body);
+    assert.equal(regData.state.dashboard.totalBalanceCents, 0);
+    assert.equal(regData.state.dashboard.isDemoAccount, false);
+
+    const cookieHeader = (regRes.headers['Set-Cookie'] || '')
+      .split(',')
+      .map((part: string) => part.trim().split(';')[0])
+      .join('; ');
+    const csrfToken = regData.csrfToken;
+
+    const txRes = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/transactions',
+      headers: {
+        cookie: cookieHeader,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        description: 'Recebimento Freelance',
+        type: 'INCOME',
+        amountCents: 50000,
+        paymentMethod: 'PIX',
+        originAccountId: '',
+        status: 'PAID',
+        occurrenceDate: '2026-10-26T12:00:00.000Z',
+      },
+    });
+    assert.equal(txRes.status, 201);
+
+    const stateAfterTxRes = await controller.dispatch({
+      method: 'GET',
+      url: '/api/v1/state',
+      headers: { cookie: cookieHeader },
+    });
+    const stateAfterTx = JSON.parse(stateAfterTxRes.body);
+    assert.equal(stateAfterTx.dashboard.totalBalanceCents, 50000);
+    assert.equal(stateAfterTx.dashboard.monthIncomeCents, 50000);
+
+    // Simula nova instância do servidor (ex: F5 / reconexão) re-hidratando o estado salvo no localStorage do cliente
+    const freshStore = new FinancialPlatformStore();
+    const freshController = createAppController(freshStore);
+    const hydrateRes = await freshController.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/hydrate',
+      body: {
+        user: stateAfterTx.user,
+        profile: stateAfterTx.profile,
+        accounts: stateAfterTx.accounts,
+        creditCards: stateAfterTx.creditCards,
+        categories: stateAfterTx.categories,
+        transactions: stateAfterTx.transactions,
+        budgets: stateAfterTx.budgets,
+        goals: stateAfterTx.goals,
+        debts: stateAfterTx.debts,
+      },
+    });
+    assert.equal(hydrateRes.status, 200);
+    const hydratedData = JSON.parse(hydrateRes.body);
+    assert.equal(hydratedData.authenticated, true);
+    assert.equal(hydratedData.state.user.email, 'teste@exemplo.com');
+    assert.equal(hydratedData.state.dashboard.totalBalanceCents, 50000);
+    assert.equal(hydratedData.state.dashboard.monthIncomeCents, 50000);
+    assert.equal(hydratedData.state.dashboard.isDemoAccount, false);
+
+    // Critério 3 & 4: Matemática financeira real, desduplicação de insights, faturas em próximos vencimentos e formatação pt-BR via "Testar Conta Demonstração"
+    const demoLoginRes = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      body: { demo: true },
+    });
+    assert.equal(demoLoginRes.status, 200);
+    const demoLoginData = JSON.parse(demoLoginRes.body);
+    assert.equal(demoLoginData.authenticated, true);
+    const demoSummary = demoLoginData.state.dashboard;
+    // Orçamento planejado da Mariana (R$ 3.209,00) - Despesas do mês (R$ 6.790,90) = -R$ 3.581,90 (-358190 centavos)
+    assert.equal(demoSummary.availableToSpendMonthCents, -358190);
+    assert.equal(demoSummary.availableToSpendStatus.chipType, 'critico');
+    assert.equal(demoSummary.availableToSpendStatus.badgeLabel, 'Orçamento excedido');
+    assert.ok(
+      demoSummary.availableToSpendStatus.helperText.includes('Limite ultrapassado em'),
+      'Deve informar o valor real excedido quando o disponível for negativo'
+    );
+
+    // Desduplicação de insights por categoria (Alimentação em 95,9% aparece apenas 1 vez com título "Limite de orçamento próximo")
+    const alimentacaoInsights = demoSummary.structuredInsights.filter((ins: { description: string }) =>
+      ins.description.includes('Alimentação')
+    );
+    assert.equal(alimentacaoInsights.length, 1);
+    assert.equal(alimentacaoInsights[0].title, 'Limite de orçamento próximo');
+    assert.ok(alimentacaoInsights[0].description.includes('95,9%'));
+
+    // Quando o gasto em Alimentação ultrapassa 100% (ex: +R$ 1.509,00 -> 284,5% do orçamento de R$ 800,00), o título passa para "Orçamento Excedido" mantendo apenas 1 card da categoria
+    store.createTransaction(demoLoginData.state.user.id, {
+      type: 'EXPENSE',
+      amountCents: 150900,
+      occurrenceDate: '2026-10-22T12:00:00.000Z',
+      categoryId: demoLoginData.state.categories.find((c: { slug: string }) => c.slug === 'alimentacao').id,
+      description: 'Compra Extra Supermercado',
+      paymentMethod: 'PIX',
+      status: 'PAID',
+    });
+    const demoSummaryExceeded = store.getDashboardSummary(demoLoginData.state.user.id);
+    const exceededInsights = demoSummaryExceeded.structuredInsights.filter((ins) =>
+      ins.description.includes('Alimentação')
+    );
+    assert.equal(exceededInsights.length, 1);
+    assert.equal(exceededInsights[0].title, 'Orçamento Excedido');
+    assert.ok(exceededInsights[0].description.includes('284,5%'));
+
+    // Sincronização de status em "Para onde seu dinheiro está indo" (Transporte com 85% do orçamento -> ALERT_80)
+    const transporteCat = demoSummary.expensesByCategory.find(
+      (c) => c.categoryName === 'Transporte'
+    );
+    assert.ok(transporteCat);
+    assert.equal(transporteCat.budgetUsedPct, 85);
+    assert.equal(transporteCat.budgetAlertLevel, 'ALERT_80');
+
+    // Faturas abertas de cartão de crédito integradas em "Próximos vencimentos"
+    const invoiceInUpcoming = demoSummary.upcomingBills.some(
+      (b: { description: string; amountCents: number }) =>
+        b.description.includes('Fatura Cartão') && b.amountCents > 0
+    );
+    assert.equal(invoiceInUpcoming, true);
+
+    // Ausência total de "mes(es)" e de "[DEMO]" / "[EXEMPLO]" nos títulos de registros
+    const demoJsonString = JSON.stringify(demoSummary);
+    assert.equal(demoJsonString.includes('mes(es)'), false);
+    assert.equal(demoJsonString.includes('[DEMO]'), false);
+    assert.equal(demoJsonString.includes('[EXEMPLO]'), false);
+
+    // Meta "Reserva de Emergência" com 1 aporte restante (faltam R$ 420,00 e aporte recorrente é R$ 500,00) deve exibir "já no próximo aporte (1 mês)"
+    const reservaGoal = demoSummary.goalProjections.find((g: { name: string }) =>
+      g.name.includes('Reserva de Emergência')
+    );
+    assert.ok(reservaGoal);
+    assert.ok(
+      reservaGoal.recommendationMessage.includes('já no próximo aporte (1 mês)')
+    );
   });
 });

@@ -1,4 +1,8 @@
-import { formatBRLFromCents } from './formatters.mjs';
+import {
+  formatBRLFromCents,
+  formatMonths,
+  formatPercentBR,
+} from './formatters.mjs';
 
                               
             
@@ -47,16 +51,16 @@ export function analyzeMonthlyBudget(params
 
   if (pct > 100) {
     alertLevel = 'EXCEEDED';
-    alertMessage = `Você ultrapassou o orçamento de ${params.categoryName} em ${formatBRLFromCents(Math.abs(remaining))} (${pct}% utilizado).`;
+    alertMessage = `Você ultrapassou o orçamento de ${params.categoryName} em ${formatBRLFromCents(Math.abs(remaining))} (${formatPercentBR(pct)} utilizado).`;
   } else if (pct === 100) {
     alertLevel = 'ALERT_100';
     alertMessage = `Você atingiu 100% do limite planejado para ${params.categoryName}.`;
   } else if (pct >= 80) {
     alertLevel = 'ALERT_80';
-    alertMessage = `Atenção: você já utilizou ${pct}% do orçamento definido para ${params.categoryName}.`;
+    alertMessage = `Atenção: você já utilizou ${formatPercentBR(pct)} do orçamento definido para ${params.categoryName}.`;
   } else if (pct >= 50) {
     alertLevel = 'ALERT_50';
-    alertMessage = `Você chegou à metade (${pct}%) do orçamento mensal de ${params.categoryName}.`;
+    alertMessage = `Você chegou à metade (${formatPercentBR(pct)}) do orçamento mensal de ${params.categoryName}.`;
   }
 
   return {
@@ -137,10 +141,15 @@ export function calculateGoalProjection(params
   let recommendationMessage = '';
   if (remaining === 0) {
     recommendationMessage = `Parabéns! Você já concluiu sua meta "${params.name}".`;
+  } else if (
+    params.recurringContributionCents > 0 &&
+    remaining <= params.recurringContributionCents
+  ) {
+    recommendationMessage = `Excelente ritmo! Mantendo ${formatBRLFromCents(params.recurringContributionCents)}/mês, você concluirá esta meta já no próximo aporte (1 mês).`;
   } else if (onTrack) {
-    recommendationMessage = `Excelente ritmo! Mantendo ${formatBRLFromCents(params.recurringContributionCents)}/mês, você concluirá "${params.name}" em cerca de ${projectedMonths} mes(es), dentro do prazo.`;
+    recommendationMessage = `Excelente ritmo! Mantendo ${formatBRLFromCents(params.recurringContributionCents)}/mês, você concluirá "${params.name}" em cerca de ${formatMonths(projectedMonths || 1)}, dentro do prazo.`;
   } else {
-    recommendationMessage = `No ritmo atual (${formatBRLFromCents(params.recurringContributionCents)}/mês), a meta levaria ${projectedMonths ?? 'muitos'} meses. Sugerimos aumentar o aporte em ${formatBRLFromCents(suggestedAdjustmentCents)}/mês (total de ${formatBRLFromCents(requiredMonthly)}/mês) para atingir o objetivo no prazo.`;
+    recommendationMessage = `No ritmo atual (${formatBRLFromCents(params.recurringContributionCents)}/mês), a meta levaria ${projectedMonths !== null ? formatMonths(projectedMonths) : 'muitos meses'}. Sugerimos aumentar o aporte em ${formatBRLFromCents(suggestedAdjustmentCents)}/mês (total de ${formatBRLFromCents(requiredMonthly)}/mês) para atingir o objetivo no prazo.`;
   }
 
   return {

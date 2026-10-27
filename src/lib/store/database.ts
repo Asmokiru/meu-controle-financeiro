@@ -27,7 +27,11 @@ import {
   calculateGoalProjection,
   simulateDebtPayoff,
 } from '../finance/simulators.ts';
-import { formatBRLFromCents } from '../finance/formatters.ts';
+import {
+  formatBRLFromCents,
+  formatMonths,
+  formatPercentBR,
+} from '../finance/formatters.ts';
 
 export class ForbiddenAccessError extends Error {
   public readonly statusCode = 403;
@@ -1980,10 +1984,26 @@ export class FinancialPlatformStore {
     if (!user) throw new ForbiddenAccessError();
 
     const accounts = this.getUserAccounts(userId);
-    const totalBalanceCents = accounts.reduce(
+    const accountsBalanceCents = accounts.reduce(
       (sum, a) => sum + a.currentBalanceCents,
       0
     );
+
+    const allUserTxs = this.getUserTransactions(userId);
+    const unlinkedNetBalanceCents = allUserTxs
+      .filter((t) => t.status === 'PAID' && !t.originAccountId && !t.creditCardId)
+      .reduce(
+        (sum, t) =>
+          sum +
+          (t.type === 'INCOME'
+            ? t.amountCents
+            : t.type === 'EXPENSE' || t.type === 'DEBT_PAYMENT'
+              ? -t.amountCents
+              : 0),
+        0
+      );
+
+    const totalBalanceCents = accountsBalanceCents + unlinkedNetBalanceCents;
 
     const monthTxs = this.getUserTransactions(userId, { month: referenceMonth });
     const prevMonth = '2026-09';
@@ -2013,7 +2033,30 @@ export class FinancialPlatformStore {
           ) / 10
         : 0;
 
-    // Despesas por categoria
+    // Orçamentos do mês (calculados antes das categorias para sincronização de status)
+    const userBudgets = Array.from(this.budgets.values()).filter(
+      (b) => b.userId === userId && b.referenceMonth === referenceMonth
+    );
+    const budgetAnalyses = userBudgets.map((b) => {
+      const cat = this.categories.get(b.categoryId);
+      const spent = monthTxs
+        .filter((t) => t.categoryId === b.categoryId && t.type === 'EXPENSE')
+        .reduce((s, t) => s + t.amountCents, 0);
+      return analyzeMonthlyBudget({
+        categoryId: b.categoryId,
+        categoryName: cat?.name || 'Categoria',
+        plannedCents: b.plannedAmountCents,
+        spentCents: spent,
+        currentDayOfMonth: 26,
+        daysInMonth: 31,
+      });
+    });
+
+    const budgetByCategoryId = new Map(
+      budgetAnalyses.map((b) => [b.categoryId, b])
+    );
+
+    // Despesas por categoria sincronizadas com os limites de orçamento da categoria
     const userCategories = Array.from(this.categories.values()).filter(
       (c) => c.userId === userId
     );
@@ -2037,8 +2080,10 @@ export class FinancialPlatformStore {
 
         const variationPct =
           prevCatSpent > 0
-            ? Math.round(((currentCatSpent - prevCatSpent) / prevCatSpent) * 100)
+            ? Math.round(((currentCatSpent - prevCatSpent) / prevCatSpent) * 1000) / 10
             : 0;
+
+        const catBudget = budgetByCategoryId.get(cat.id);
 
         return {
           categoryId: cat.id,
@@ -2049,6 +2094,9 @@ export class FinancialPlatformStore {
           spentCents: currentCatSpent,
           prevSpentCents: prevCatSpent,
           variationPct,
+          budgetPlannedCents: catBudget ? catBudget.plannedCents : null,
+          budgetUsedPct: catBudget ? catBudget.percentageUsed : null,
+          budgetAlertLevel: catBudget ? catBudget.alertLevel : null,
           sharePct:
             monthExpenseCents > 0
               ? Math.round((currentCatSpent / monthExpenseCents) * 1000) / 10
@@ -2057,39 +2105,6 @@ export class FinancialPlatformStore {
       })
       .filter((c) => c.spentCents > 0)
       .sort((a, b) => b.spentCents - a.spentCents);
-
-    // Orçamentos do mês
-    const userBudgets = Array.from(this.budgets.values()).filter(
-      (b) => b.userId === userId && b.referenceMonth === referenceMonth
-    );
-    const budgetAnalyses = userBudgets.map((b) => {
-      const cat = this.categories.get(b.categoryId);
-      const spent = monthTxs
-        .filter((t) => t.categoryId === b.categoryId && t.type === 'EXPENSE')
-        .reduce((s, t) => s + t.amountCents, 0);
-      return analyzeMonthlyBudget({
-        categoryId: b.categoryId,
-        categoryName: cat?.name || 'Categoria',
-        plannedCents: b.plannedAmountCents,
-        spentCents: spent,
-        currentDayOfMonth: 26,
-        daysInMonth: 31,
-      });
-    });
-
-    const totalPlannedBudgetCents = budgetAnalyses.reduce(
-      (s, b) => s + b.plannedCents,
-      0
-    );
-    const totalSpentInBudgetsCents = budgetAnalyses.reduce(
-      (s, b) => s + b.spentCents,
-      0
-    );
-    const availableToSpendMonthCents = Math.max(
-      0,
-      (totalPlannedBudgetCents > 0 ? totalPlannedBudgetCents : monthIncomeCents) -
-        monthExpenseCents
-    );
 
     // Metas com projeção
     const userGoals = Array.from(this.goals.values()).filter(
@@ -2107,16 +2122,125 @@ export class FinancialPlatformStore {
       })
     );
 
-    // Próximos vencimentos (pendentes ou agendados)
-    const upcomingBills = monthTxs
-      .filter((t) => t.status === 'PENDING' || t.status === 'SCHEDULED' || t.status === 'OVERDUE')
-      .slice(0, 6);
+    const totalGoalsMonthlyCents = userGoals.reduce(
+      (s, g) => s + (g.currentAmountCents < g.targetAmountCents ? g.recurringContributionCents : 0),
+      0
+    );
+
+    const totalPlannedBudgetCents = budgetAnalyses.reduce(
+      (s, b) => s + b.plannedCents,
+      0
+    );
+
+    // Orçamento mensal efetivo: Orçamento Mensal Planejado (quando definido) ou Receitas - Metas
+    const incomeMinusGoalsCents = Math.max(0, monthIncomeCents - totalGoalsMonthlyCents);
+    const effectiveMonthlyBudgetCents =
+      totalPlannedBudgetCents > 0
+        ? totalPlannedBudgetCents
+        : incomeMinusGoalsCents;
+
+    // Disponível real para gastar no mês (pode ser negativo se o orçamento foi excedido!)
+    const availableToSpendMonthCents =
+      effectiveMonthlyBudgetCents - monthExpenseCents;
+
+    const budgetConsumedPct =
+      effectiveMonthlyBudgetCents > 0
+        ? Math.round((monthExpenseCents / effectiveMonthlyBudgetCents) * 1000) / 10
+        : monthExpenseCents > 0
+          ? 100
+          : 0;
+
+    let availableToSpendStatus: {
+      chipType: 'positivo' | 'atencao' | 'critico' | 'pendente';
+      badgeLabel: string;
+      helperText: string;
+      consumedPct: number;
+      exceededCents: number;
+    };
+
+    if (effectiveMonthlyBudgetCents === 0 && monthExpenseCents === 0) {
+      availableToSpendStatus = {
+        chipType: 'pendente',
+        badgeLabel: 'Sem orçamento ativo',
+        helperText: 'Cadastre receitas ou limites para calcular margem',
+        consumedPct: 0,
+        exceededCents: 0,
+      };
+    } else if (budgetConsumedPct >= 100 || availableToSpendMonthCents <= 0) {
+      const exceeded = Math.max(0, monthExpenseCents - effectiveMonthlyBudgetCents);
+      availableToSpendStatus = {
+        chipType: 'critico',
+        badgeLabel: 'Orçamento excedido',
+        helperText: `Limite ultrapassado em ${formatBRLFromCents(exceeded)}`,
+        consumedPct: budgetConsumedPct,
+        exceededCents: exceeded,
+      };
+    } else if (budgetConsumedPct >= 80) {
+      availableToSpendStatus = {
+        chipType: 'atencao',
+        badgeLabel: 'Atenção ao limite',
+        helperText: 'Margem reduzida até o fim do mês',
+        consumedPct: budgetConsumedPct,
+        exceededCents: 0,
+      };
+    } else {
+      availableToSpendStatus = {
+        chipType: 'positivo',
+        badgeLabel: 'Dentro do orçamento',
+        helperText: 'Margem segura até o fim do mês',
+        consumedPct: budgetConsumedPct,
+        exceededCents: 0,
+      };
+    }
 
     // Resumo de cartões de crédito
     const creditCardsSummary = this.getUserCreditCardsWithSummary(
       userId,
       referenceMonth
     );
+
+    // Próximos vencimentos: integra contas pendentes/agendadas + faturas abertas de cartões de crédito, ordenadas por data
+    const txUpcomingBills = monthTxs
+      .filter(
+        (t) =>
+          t.status === 'PENDING' ||
+          t.status === 'SCHEDULED' ||
+          t.status === 'OVERDUE'
+      )
+      .map((t) => ({
+        id: t.id,
+        description: t.description,
+        amountCents: t.amountCents,
+        dueDate: t.dueDate || t.occurrenceDate,
+        occurrenceDate: t.occurrenceDate,
+        status: t.status,
+        isCreditCardInvoice: false,
+      }));
+
+    const cardInvoiceBills = creditCardsSummary
+      .filter((card) => card.currentInvoiceCents > 0)
+      .map((card) => {
+        const dueDayStr = String(Math.min(28, Math.max(1, card.dueDay))).padStart(2, '0');
+        const nextDueMonth = card.dueDay >= 26 ? '2026-10' : '2026-11';
+        const dueDateIso = `${nextDueMonth}-${dueDayStr}T10:00:00.000Z`;
+        return {
+          id: `card-invoice-${card.id}`,
+          description: `Fatura ${card.name}`,
+          amountCents: card.currentInvoiceCents,
+          dueDate: dueDateIso,
+          occurrenceDate: dueDateIso,
+          status: 'PENDING' as const,
+          isCreditCardInvoice: true,
+        };
+      });
+
+    const upcomingBills = [...txUpcomingBills, ...cardInvoiceBills]
+      .sort(
+        (a, b) =>
+          new Date(a.dueDate || a.occurrenceDate).getTime() -
+          new Date(b.dueDate || b.occurrenceDate).getTime()
+      )
+      .slice(0, 6);
 
     // Dívidas e simulação
     const userDebts = Array.from(this.debts.values()).filter(
@@ -2133,46 +2257,129 @@ export class FinancialPlatformStore {
       30000
     );
 
-    // Geração de Insights Financeiros do Dia em linguagem simples
-    const dailyInsights: string[] = [];
-    const foodCat = expensesByCategory.find((c) => c.slug === 'alimentacao');
-    if (foodCat && foodCat.variationPct > 0) {
-      dailyInsights.push(
-        `Seus gastos com alimentação aumentaram ${foodCat.variationPct}% em relação ao mês passado.`
-      );
-    }
-    for (const b of budgetAnalyses) {
-      if (b.percentageUsed >= 80) {
-        dailyInsights.push(
-          `Você já utilizou ${b.percentageUsed}% do orçamento definido para ${b.categoryName.toLowerCase()}.`
-        );
+    // Motor de Insights Financeiros do Dia: Desduplicado por categoria e com títulos precisos
+    const structuredInsights: Array<{
+      id: string;
+      categoryKey: string;
+      severity: 'critico' | 'atencao' | 'positivo' | 'estavel';
+      badgeLabel: string;
+      title: string;
+      description: string;
+      targetTab: string;
+    }> = [];
+
+    const seenCategoryKeys = new Set<string>();
+
+    // Avalia cada categoria uma única vez, combinando variação mensal e consumo de orçamento
+    for (const catItem of expensesByCategory) {
+      const catKey = `cat:${catItem.slug}`;
+      if (seenCategoryKeys.has(catKey)) continue;
+
+      const pctUsed = catItem.budgetUsedPct;
+      const varPct = catItem.variationPct;
+
+      if (pctUsed !== null && pctUsed > 100) {
+        seenCategoryKeys.add(catKey);
+        const desc =
+          varPct > 0
+            ? `Gasto em ${catItem.categoryName} foi ${formatPercentBR(varPct)} maior que no mês anterior, atingindo ${formatPercentBR(pctUsed)} do orçamento (${formatBRLFromCents(catItem.spentCents)} de ${formatBRLFromCents(catItem.budgetPlannedCents!)}).`
+            : `Você utilizou ${formatPercentBR(pctUsed)} do orçamento de ${catItem.categoryName} (${formatBRLFromCents(catItem.spentCents)} de ${formatBRLFromCents(catItem.budgetPlannedCents!)}).`;
+        structuredInsights.push({
+          id: `insight-exceeded-${catItem.slug}`,
+          categoryKey: catKey,
+          severity: 'critico',
+          badgeLabel: 'Crítico',
+          title: 'Orçamento Excedido',
+          description: desc,
+          targetTab: 'budgets',
+        });
+      } else if (pctUsed !== null && pctUsed >= 80) {
+        seenCategoryKeys.add(catKey);
+        const desc =
+          varPct > 0
+            ? `Gasto em ${catItem.categoryName} aumentou ${formatPercentBR(varPct)} vs mês anterior, atingindo ${formatPercentBR(pctUsed)} do orçamento (${formatBRLFromCents(catItem.spentCents)} de ${formatBRLFromCents(catItem.budgetPlannedCents!)}).`
+            : `Você já utilizou ${formatPercentBR(pctUsed)} do orçamento definido para ${catItem.categoryName.toLowerCase()} (${formatBRLFromCents(catItem.spentCents)} de ${formatBRLFromCents(catItem.budgetPlannedCents!)}).`;
+        structuredInsights.push({
+          id: `insight-limit-${catItem.slug}`,
+          categoryKey: catKey,
+          severity: 'atencao',
+          badgeLabel: 'Atenção',
+          title: 'Limite de orçamento próximo',
+          description: desc,
+          targetTab: 'budgets',
+        });
+      } else if (varPct > 10) {
+        seenCategoryKeys.add(catKey);
+        const desc =
+          pctUsed !== null
+            ? `Seus gastos com ${catItem.categoryName.toLowerCase()} aumentaram ${formatPercentBR(varPct)} em relação ao mês passado (${formatPercentBR(pctUsed)} do orçamento utilizado).`
+            : `Seus gastos com ${catItem.categoryName.toLowerCase()} aumentaram ${formatPercentBR(varPct)} em relação ao mês passado.`;
+        structuredInsights.push({
+          id: `insight-var-${catItem.slug}`,
+          categoryKey: catKey,
+          severity: 'atencao',
+          badgeLabel: 'Atenção',
+          title: `Aumento em ${catItem.categoryName}`,
+          description: desc,
+          targetTab: 'transactions',
+        });
       }
     }
+
     if (monthlyResultCents < 0) {
-      dailyInsights.push(
-        'Mantendo esse ritmo, você poderá encerrar o mês com saldo negativo.'
-      );
+      structuredInsights.push({
+        id: 'insight-negative-result',
+        categoryKey: 'global:negative-result',
+        severity: 'critico',
+        badgeLabel: 'Crítico',
+        title: 'Resultado mensal negativo',
+        description:
+          'Mantendo esse ritmo, você encerrará o mês com despesas superiores às receitas.',
+        targetTab: 'reports',
+      });
     }
+
     for (const gp of goalProjections) {
       if (gp.remainingAmountCents > 0 && gp.remainingAmountCents <= 250000) {
-        dailyInsights.push(
-          `Você está a ${formatBRLFromCents(gp.remainingAmountCents)} de concluir sua meta de ${gp.name.toLowerCase()}.`
-        );
+        structuredInsights.push({
+          id: `insight-goal-${gp.goalId}`,
+          categoryKey: `goal:${gp.goalId}`,
+          severity: 'positivo',
+          badgeLabel: 'Positivo',
+          title: 'Meta quase concluída',
+          description: `Você está a ${formatBRLFromCents(gp.remainingAmountCents)} de concluir sua meta de ${gp.name}.`,
+          targetTab: 'goals',
+        });
       }
     }
-    if (dailyInsights.length === 0) {
-      dailyInsights.push(
-        `Sua taxa de poupança neste mês está em ${savingsRatePercentage}%. Continue acompanhando seus objetivos!`
-      );
+
+    if (structuredInsights.length === 0) {
+      structuredInsights.push({
+        id: 'insight-default-savings',
+        categoryKey: 'global:savings',
+        severity: savingsRatePercentage > 0 ? 'positivo' : 'estavel',
+        badgeLabel: savingsRatePercentage > 0 ? 'Positivo' : 'Estável',
+        title: 'Resumo de hábito financeiro',
+        description: `Sua taxa de poupança neste mês está em ${formatPercentBR(savingsRatePercentage)}. Continue acompanhando seus objetivos!`,
+        targetTab: 'reports',
+      });
     }
+
+    // Ordena por prioridade (critico -> atencao -> positivo -> estavel) e limita a 3 cards
+    const severityOrder = { critico: 0, atencao: 1, positivo: 2, estavel: 3 };
+    const topStructuredInsights = structuredInsights
+      .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity])
+      .slice(0, 3);
+
+    const dailyInsights = topStructuredInsights.map((i) => i.description);
 
     const expenseComparisonPrevMonthPct =
       prevMonthExpenseCents > 0
         ? Math.round(
             ((monthExpenseCents - prevMonthExpenseCents) /
               prevMonthExpenseCents) *
-              100
-          )
+              1000
+          ) / 10
         : 0;
 
     return {
@@ -2183,7 +2390,9 @@ export class FinancialPlatformStore {
       monthExpenseCents,
       monthInvestmentsCents,
       monthlyResultCents,
+      effectiveMonthlyBudgetCents,
       availableToSpendMonthCents,
+      availableToSpendStatus,
       savingsRatePercentage,
       expenseComparisonPrevMonthPct,
       expensesByCategory,
@@ -2197,7 +2406,165 @@ export class FinancialPlatformStore {
         snowball: snowballSimulation,
       },
       dailyInsights,
+      structuredInsights: topStructuredInsights,
     };
+  }
+
+  /**
+   * Hidrata de forma idempotente um usuário e seus dados financeiros salvos pelo cliente
+   * (garantindo continuidade entre instâncias serverless e persistência local).
+   */
+  public hydrateUserFinancialState(payload: {
+    user: { id: string; name: string; email: string; createdAt?: string };
+    accounts?: AccountEntity[];
+    creditCards?: CreditCardEntity[];
+    categories?: CategoryEntity[];
+    transactions?: TransactionEntity[];
+    budgets?: BudgetEntity[];
+    goals?: GoalEntity[];
+    debts?: DebtEntity[];
+  }): { userId: string; sessionId: string } {
+    const cleanEmail = String(payload.user.email || '').trim().toLowerCase();
+    let existingUser = Array.from(this.users.values()).find(
+      (u) => u.id === payload.user.id || u.email === cleanEmail
+    );
+
+    const now = new Date().toISOString();
+    const userId = existingUser ? existingUser.id : payload.user.id;
+
+    if (!existingUser) {
+      existingUser = {
+        id: userId,
+        name: payload.user.name || 'Usuário',
+        email: cleanEmail,
+        passwordHash: hashPassword('HydratedSession@2026!'),
+        emailVerified: true,
+        emailVerificationToken: null,
+        emailVerificationExpires: null,
+        passwordResetTokenHash: null,
+        passwordResetExpires: null,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        deletionRequestedAt: null,
+        deletionScheduledFor: null,
+        isDemoAccount: false,
+        createdAt: payload.user.createdAt || now,
+        updatedAt: now,
+      };
+      this.users.set(userId, existingUser);
+    }
+
+    if (!this.userProfiles.has(userId)) {
+      this.userProfiles.set(userId, {
+        id: crypto.randomUUID(),
+        userId,
+        estimatedMonthlyIncomeCents: 0,
+        encryptedIncomeData: encryptAtRest('0'),
+        incomeType: 'FIXED',
+        mainGoals: ['Reserva de Emergência'],
+        fixedMonthlyExpensesCents: 0,
+        hasExistingDebts: false,
+        budgetControlMode: 'INDIVIDUAL',
+        relevantCategories: ['Alimentação', 'Moradia', 'Transporte', 'Lazer'],
+        onboardingCompleted: true,
+        onboardingSkipped: false,
+        themePreference: 'light',
+        learnedCategoryRulesJson: '{}',
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    // Garante categorias do usuário
+    if (Array.isArray(payload.categories) && payload.categories.length > 0) {
+      for (const c of payload.categories) {
+        if (c && c.id) {
+          this.categories.set(c.id, { ...c, userId });
+        }
+      }
+    } else {
+      const hasCats = Array.from(this.categories.values()).some(
+        (c) => c.userId === userId
+      );
+      if (!hasCats) {
+        for (const baseCat of INITIAL_CATEGORIES) {
+          const catId = crypto.randomUUID();
+          this.categories.set(catId, {
+            id: catId,
+            userId,
+            name: baseCat.name,
+            slug: baseCat.slug,
+            type: baseCat.type,
+            icon: baseCat.icon,
+            color: baseCat.color,
+            isSystem: true,
+            isFixedCost: baseCat.isFixedCost,
+            keywords: [...baseCat.keywords],
+            createdAt: now,
+          });
+        }
+      }
+    }
+
+    if (Array.isArray(payload.accounts)) {
+      for (const a of payload.accounts) {
+        if (a && a.id) this.accounts.set(a.id, { ...a, userId });
+      }
+    }
+    if (Array.isArray(payload.creditCards)) {
+      for (const cc of payload.creditCards) {
+        if (cc && cc.id) this.creditCards.set(cc.id, { ...cc, userId });
+      }
+    }
+    if (Array.isArray(payload.transactions)) {
+      for (const tx of payload.transactions) {
+        if (tx && tx.id) this.transactions.set(tx.id, { ...tx, userId });
+      }
+    }
+    if (Array.isArray(payload.budgets)) {
+      for (const b of payload.budgets) {
+        if (b && b.id) this.budgets.set(b.id, { ...b, userId });
+      }
+    }
+    if (Array.isArray(payload.goals)) {
+      for (const g of payload.goals) {
+        if (g && g.id) this.goals.set(g.id, { ...g, userId });
+      }
+    }
+    if (Array.isArray(payload.debts)) {
+      for (const d of payload.debts) {
+        if (d && d.id) this.debts.set(d.id, { ...d, userId });
+      }
+    }
+
+    // Cria ou reutiliza sessão ativa
+    let activeSession = Array.from(this.sessions.values()).find(
+      (s) => s.userId === userId && !s.isRevoked
+    );
+    if (!activeSession) {
+      const sid = crypto.randomUUID();
+      activeSession = {
+        id: sid,
+        userId,
+        accessTokenJti: crypto.randomUUID(),
+        refreshTokenHash: hashToken(sid),
+        refreshTokenFamily: crypto.randomUUID(),
+        browser: 'Navegador Web',
+        os: 'Web',
+        deviceName: 'Sessão Persistente',
+        approximateLocation: 'Brasil',
+        ipAddressMasked: '127.0.0.***',
+        mfaVerified: true,
+        isRevoked: false,
+        revokedReason: null,
+        lastActiveAt: now,
+        expiresAt: new Date(Date.now() + 7 * 24 * 3600_000).toISOString(),
+        createdAt: now,
+      };
+      this.sessions.set(sid, activeSession);
+    }
+
+    return { userId, sessionId: activeSession.id };
   }
 
   // --------------------------------------------------------------------------

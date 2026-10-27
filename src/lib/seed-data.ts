@@ -1,15 +1,15 @@
 import { FinancialPlatformStore, defaultStore } from './store/database.ts';
 
 export const DEMO_USER_CREDENTIALS = {
-  name: 'Mariana Costa [CONTA DEMO - DADOS FICTÍCIOS]',
+  name: 'Mariana Costa',
   email: 'demo@exemplo.ficticio.local',
   password: 'Demo@Segura2026!Ficticia',
 };
 
 /**
- * Popula a instância do banco com dados 100% fictícios e claramente identificados
- * como [EXEMPLO / DEMO], garantindo que todos os módulos, gráficos, alertas e insights
- * funcionem imediatamente na demonstração.
+ * Popula a instância do banco com dados fictícios da Conta Demonstração (Mariana Costa),
+ * mantendo os nomes dos registros limpos (sem sufixos ou prefixos [DEMO]/[EXEMPLO] nos títulos),
+ * garantindo que todos os módulos, gráficos, alertas e insights funcionem na demonstração.
  */
 export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
   demoUserId: string;
@@ -32,7 +32,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
 
   const userId = user.id;
 
-  // 1. Atualiza Onboarding Financeiro Fictício
+  // 1. Atualiza Onboarding Financeiro da Conta Demonstração
   store.updateOnboardingProfile(userId, {
     estimatedMonthlyIncomeCents: 850000, // R$ 8.500,00
     incomeType: 'MIXED',
@@ -56,46 +56,46 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     themePreference: 'system',
   });
 
-  // 2. Cria Contas e Carteiras Fictícias
+  // 2. Cria Contas e Carteiras com nomes limpos
   const checkingAcc = store.createAccount(userId, {
-    name: 'Banco Horizonte - Conta Principal [DEMO]',
+    name: 'Banco Horizonte - Conta Principal',
     type: 'CHECKING',
-    institutionName: 'Banco Fictício Horizonte S.A.',
+    institutionName: 'Banco Horizonte S.A.',
     initialBalanceCents: 345000,
     color: '#0F766E',
     icon: 'landmark',
   });
 
   const digitalAcc = store.createAccount(userId, {
-    name: 'Conta Digital Reserva [DEMO]',
+    name: 'Conta Digital Reserva',
     type: 'DIGITAL_ACCOUNT',
-    institutionName: 'Fintech Exemplo Pagamentos',
+    institutionName: 'Horizonte Pagamentos Digitais',
     initialBalanceCents: 958000,
     color: '#0284C7',
     icon: 'smartphone',
   });
 
   const cashWallet = store.createAccount(userId, {
-    name: 'Carteira em Dinheiro [DEMO]',
+    name: 'Carteira em Dinheiro',
     type: 'CASH_WALLET',
-    institutionName: 'Espécie (Fictício)',
+    institutionName: 'Espécie',
     initialBalanceCents: 22000,
     color: '#D97706',
     icon: 'wallet',
   });
 
   const investAcc = store.createAccount(userId, {
-    name: 'Tesouro Direto & CDB [DEMO]',
+    name: 'Tesouro Direto & CDB',
     type: 'INVESTMENT',
-    institutionName: 'Corretora Exemplo',
+    institutionName: 'Corretora Horizonte Invest',
     initialBalanceCents: 1450000,
     color: '#059669',
     icon: 'trending-up',
   });
 
-  // 3. Cria Cartões de Crédito Fictícios
+  // 3. Cria Cartões de Crédito com nomes limpos
   const cardMain = store.createCreditCard(userId, {
-    name: 'Cartão Horizonte Platinum [DEMO]',
+    name: 'Cartão Horizonte Platinum',
     brand: 'Mastercard',
     lastFourDigits: '0000',
     totalLimitCents: 600000, // R$ 6.000,00
@@ -106,7 +106,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
   });
 
   const cardMarket = store.createCreditCard(userId, {
-    name: 'Cartão Compras & Casa [DEMO]',
+    name: 'Cartão Compras & Casa',
     brand: 'Visa',
     lastFourDigits: '1111',
     totalLimitCents: 250000, // R$ 2.500,00
@@ -131,7 +131,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-09-05T10:00:00.000Z',
     originAccountId: checkingAcc.id,
     categoryId: getCatId('salario'),
-    description: '[EXEMPLO] Salário Mensal Setembro',
+    description: 'Salário Mensal Setembro',
     paymentMethod: 'TRANSFER',
     status: 'PAID',
   });
@@ -143,7 +143,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-09-12T14:00:00.000Z',
     originAccountId: checkingAcc.id,
     categoryId: getCatId('alimentacao'),
-    description: '[EXEMPLO] Supermercado Mensal Setembro',
+    description: 'Supermercado Mensal Setembro',
     paymentMethod: 'DEBIT',
     status: 'PAID',
   });
@@ -154,7 +154,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-09-10T09:00:00.000Z',
     originAccountId: checkingAcc.id,
     categoryId: getCatId('moradia'),
-    description: '[EXEMPLO] Aluguel + Condomínio Setembro',
+    description: 'Aluguel e Condomínio Setembro',
     paymentMethod: 'BOLETO',
     status: 'PAID',
   });
@@ -166,7 +166,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-05T09:00:00.000Z',
     originAccountId: checkingAcc.id,
     categoryId: getCatId('salario'),
-    description: '[EXEMPLO] Salário Líquido Outubro',
+    description: 'Salário Líquido Outubro',
     paymentMethod: 'TRANSFER',
     status: 'PAID',
     recurrence: 'MONTHLY',
@@ -179,7 +179,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-14T16:30:00.000Z',
     originAccountId: digitalAcc.id,
     categoryId: getCatId('freelance'),
-    description: '[EXEMPLO] Projeto UX Design Freelance (Cliente Fictício)',
+    description: 'Projeto UX Design Freelance',
     paymentMethod: 'PIX',
     status: 'PAID',
     tags: ['renda-extra', 'freela'],
@@ -191,7 +191,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-10T10:00:00.000Z',
     originAccountId: checkingAcc.id,
     categoryId: getCatId('moradia'),
-    description: '[EXEMPLO] Aluguel e Condomínio Residencial',
+    description: 'Aluguel e Condomínio Residencial',
     paymentMethod: 'BOLETO',
     status: 'PAID',
     recurrence: 'MONTHLY',
@@ -205,7 +205,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-11T11:20:00.000Z',
     creditCardId: cardMarket.id,
     categoryId: getCatId('alimentacao'),
-    description: '[EXEMPLO] Supermercado Família (Compra do Mês)',
+    description: 'Supermercado Família (Compra do Mês)',
     paymentMethod: 'CREDIT',
     status: 'PAID',
     tags: ['mercado', 'familia'],
@@ -217,7 +217,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-18T19:45:00.000Z',
     creditCardId: cardMain.id,
     categoryId: getCatId('alimentacao'),
-    description: '[EXEMPLO] Hortifruti & Padaria Semanal',
+    description: 'Hortifruti & Padaria Semanal',
     paymentMethod: 'CREDIT',
     status: 'PAID',
     tags: ['feira'],
@@ -230,7 +230,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-19T08:15:00.000Z',
     creditCardId: cardMain.id,
     categoryId: getCatId('transporte'),
-    description: '[EXEMPLO] Combustível e Mobilidade Urbana',
+    description: 'Combustível e Mobilidade Urbana',
     paymentMethod: 'CREDIT',
     status: 'PAID',
     tags: ['mobilidade'],
@@ -242,7 +242,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-15T08:00:00.000Z',
     creditCardId: cardMain.id,
     categoryId: getCatId('assinaturas'),
-    description: '[EXEMPLO] Streaming Vídeo + Música Familiar',
+    description: 'Streaming Vídeo + Música Familiar',
     paymentMethod: 'CREDIT',
     status: 'PAID',
     recurrence: 'MONTHLY',
@@ -255,7 +255,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-16T15:00:00.000Z',
     originAccountId: checkingAcc.id,
     categoryId: getCatId('saude'),
-    description: '[EXEMPLO] Plano de Saúde + Farmácia',
+    description: 'Plano de Saúde + Farmácia',
     paymentMethod: 'DEBIT',
     status: 'PAID',
     tags: ['saude'],
@@ -267,7 +267,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-20T17:00:00.000Z',
     originAccountId: cashWallet.id,
     categoryId: getCatId('lazer'),
-    description: '[EXEMPLO] Passeio Cultural e Cinema em Família',
+    description: 'Passeio Cultural e Cinema em Família',
     paymentMethod: 'CASH',
     status: 'PAID',
     tags: ['lazer'],
@@ -280,7 +280,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     occurrenceDate: '2026-10-08T14:00:00.000Z',
     creditCardId: cardMain.id,
     categoryId: getCatId('educacao'),
-    description: '[EXEMPLO] Curso de Especialização Online (3x)',
+    description: 'Curso de Especialização Online (3x)',
     paymentMethod: 'CREDIT',
     status: 'PAID',
     installmentTotal: 3,
@@ -295,7 +295,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     dueDate: '2026-10-28T10:00:00.000Z',
     originAccountId: checkingAcc.id,
     categoryId: getCatId('moradia'),
-    description: '[EXEMPLO] Conta de Energia Elétrica Outubro',
+    description: 'Conta de Energia Elétrica',
     paymentMethod: 'BOLETO',
     status: 'PENDING',
     recurrence: 'MONTHLY',
@@ -310,13 +310,13 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     originAccountId: checkingAcc.id,
     destinationAccountId: investAcc.id,
     categoryId: getCatId('investimentos'),
-    description: '[EXEMPLO] Aporte Mensal Tesouro Selic',
+    description: 'Aporte Mensal Tesouro Selic',
     paymentMethod: 'PIX',
     status: 'PAID',
     tags: ['reserva', 'futuro'],
   });
 
-  // 6. Orçamentos Mensais (Exatamente como solicitado no enunciado)
+  // 6. Orçamentos Mensais
   store.upsertBudget(userId, {
     categoryId: getCatId('alimentacao'),
     referenceMonth: '2026-10',
@@ -352,7 +352,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
   });
 
   store.createGoal(userId, {
-    name: 'Viagem em Família - Nordeste [DEMO]',
+    name: 'Viagem em Família - Nordeste',
     targetAmountCents: 600000, // R$ 6.000,00
     currentAmountCents: 240000, // R$ 2.400,00
     targetDate: '2027-07-01T00:00:00.000Z',
@@ -364,7 +364,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
   });
 
   store.createGoal(userId, {
-    name: 'Quitação Antecipada de Dívidas [DEMO]',
+    name: 'Quitação Antecipada de Dívidas',
     targetAmountCents: 450000,
     currentAmountCents: 180000,
     targetDate: '2027-04-01T00:00:00.000Z',
@@ -375,10 +375,10 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     color: '#7C3AED',
   });
 
-  // 8. Dívidas Fictícias para Simulação Avalanche vs. Bola de Neve
+  // 8. Dívidas para Simulação Avalanche vs. Bola de Neve
   store.createDebt(userId, {
-    name: 'Crédito Pessoal Renegociado [DEMO]',
-    creditor: 'Financeira Exemplo S.A.',
+    name: 'Crédito Pessoal Renegociado',
+    creditor: 'Financeira Horizonte S.A.',
     totalAmountCents: 480000,
     remainingAmountCents: 310000,
     monthlyInterestRateBp: 289, // 2,89% a.m.
@@ -391,8 +391,8 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
   });
 
   store.createDebt(userId, {
-    name: 'Parcelamento Equipamento de Trabalho [DEMO]',
-    creditor: 'Loja Tech Fictícia',
+    name: 'Parcelamento Equipamento de Trabalho',
+    creditor: 'Loja Tech Brasil',
     totalAmountCents: 240000,
     remainingAmountCents: 115000,
     monthlyInterestRateBp: 149, // 1,49% a.m.
@@ -404,13 +404,13 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     preferredStrategy: 'SNOWBALL',
   });
 
-  // 9. Notificações Iniciais Fictícias
+  // 9. Notificações Iniciais
   store.createNotification({
     userId,
     type: 'BUDGET_THRESHOLD',
     title: 'Alerta de Orçamento: Transporte em 85%',
     message:
-      '[DEMO] Você já utilizou R$ 255,00 (85%) do orçamento mensal planejado de R$ 300,00 para Transporte.',
+      'Você já utilizou R$ 255,00 (85%) do orçamento mensal planejado de R$ 300,00 para Transporte.',
   });
 
   store.createNotification({
@@ -418,7 +418,7 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     type: 'UPCOMING_DUE',
     title: 'Vencimento próximo em 2 dias',
     message:
-      '[DEMO] A conta "[EXEMPLO] Conta de Energia Elétrica Outubro" (R$ 165,00) vence em 28/10/2026.',
+      'A conta "Conta de Energia Elétrica" (R$ 165,00) vence em 28/10/2026.',
   });
 
   return { demoUserId: userId };
