@@ -1,4 +1,4 @@
-import 'server-only';
+if (typeof window !== 'undefined') { throw new Error('This module cannot be imported from a Client Component module.'); }
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

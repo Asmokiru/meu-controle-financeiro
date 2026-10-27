@@ -1,6 +1,5 @@
 // lib/supabase/admin.ts
-import 'server-only'
-import { createClient } from '@supabase/supabase-js'
+if (typeof window !== 'undefined') { throw new Error('This module cannot be imported from a Client Component module.'); }import { createClient } from '@supabase/supabase-js'
 
 if (typeof window !== 'undefined') {
   throw new Error(

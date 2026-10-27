@@ -14,6 +14,11 @@ function compileDir(srcDir: string, outDir: string): void {
     } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
       const tsCode = fs.readFileSync(fullSrc, 'utf8');
       let jsCode = stripTypeScriptTypes(tsCode);
+      // Substitui import 'server-only' por guarda compatível com Node.js Serverless padrão (sem exigir flag --conditions=react-server)
+      jsCode = jsCode.replace(
+        /import\s+['"]server-only['"]\s*;?/g,
+        "if (typeof window !== 'undefined') { throw new Error('This module cannot be imported from a Client Component module.'); }"
+      );
       // Reescreve imports relativos .ts para .mjs
       jsCode = jsCode.replace(
         /(from\s+['"]\.[^'"]+)\.ts(['"])/g,
@@ -103,7 +108,4 @@ export default async function handler(req, res) {
 `;
 
 fs.writeFileSync(path.join(ROOT, 'api/index.mjs'), apiIndexMjs, 'utf8');
-if (fs.existsSync(path.join(ROOT, 'api/index.ts'))) {
-  fs.unlinkSync(path.join(ROOT, 'api/index.ts'));
-}
-console.log('✅ Bundle serverless api/index.mjs gerado com sucesso.');
+console.log('✅ Bundle serverless api/index.mjs atualizado com sucesso.');
