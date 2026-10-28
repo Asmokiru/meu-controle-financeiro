@@ -124,6 +124,60 @@ export function seedDemoData(store: FinancialPlatformStore = defaultStore): {
     return found ? found.id : '';
   };
 
+  // 3.1 Salário e Rendas Fixas Recorrentes da Conta Demonstração
+  store.createRecurringIncome(userId, {
+    description: 'Salário Líquido Mensal',
+    amountCents: 550000,
+    paymentDay: 5,
+    categoryId: getCatId('salario'),
+    active: true,
+  });
+
+  store.createRecurringIncome(userId, {
+    description: 'Vale Alimentação',
+    amountCents: 80000,
+    paymentDay: 1,
+    categoryId: getCatId('outros'),
+    active: true,
+  });
+
+  // 3.2 Contas Fixas Mensais Recorrentes da Conta Demonstração
+  store.createRecurringExpense(userId, {
+    description: 'Aluguel e Condomínio Residencial',
+    defaultAmountCents: 225000,
+    dueDay: 10,
+    categoryId: getCatId('moradia'),
+    valueType: 'fixo',
+    active: true,
+  });
+
+  store.createRecurringExpense(userId, {
+    description: 'Internet Fibra Residencial',
+    defaultAmountCents: 12990,
+    dueDay: 15,
+    categoryId: getCatId('moradia'),
+    valueType: 'fixo',
+    active: true,
+  });
+
+  store.createRecurringExpense(userId, {
+    description: 'Conta de Energia Elétrica',
+    defaultAmountCents: 16500,
+    dueDay: 28,
+    categoryId: getCatId('moradia'),
+    valueType: 'variavel',
+    active: true,
+  });
+
+  store.createRecurringExpense(userId, {
+    description: 'Plano de Saúde Familiar',
+    defaultAmountCents: 42000,
+    dueDay: 16,
+    categoryId: getCatId('saude'),
+    valueType: 'fixo',
+    active: true,
+  });
+
   // 4. Transações do mês anterior (Setembro/2026) para comparação histórica
   store.createTransaction(userId, {
     type: 'INCOME',

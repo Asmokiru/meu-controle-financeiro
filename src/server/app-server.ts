@@ -59,7 +59,7 @@ export function createAppController(
     demoSessionId = existingSessions[0].id;
   }
 
-  function buildClientState(userId: string) {
+  function buildClientState(userId: string, month = '2026-10') {
     const user = store.users.get(userId);
     if (!user) throw new AuthenticationError('Sessão inválida ou usuário inexistente.');
     const {
@@ -69,7 +69,8 @@ export function createAppController(
       ...safeUser
     } = user;
     const profile = store.userProfiles.get(userId);
-    const dashboard = store.getDashboardSummary(userId, '2026-10');
+    const targetMonth = month || '2026-10';
+    const dashboard = store.getDashboardSummary(userId, targetMonth);
     const accounts = store.getUserAccounts(userId);
     const creditCards = Array.from(store.creditCards.values()).filter(
       (cc) => cc.userId === userId && !cc.isArchived
@@ -78,6 +79,8 @@ export function createAppController(
       (c) => c.userId === userId
     );
     const transactions = store.getUserTransactions(userId);
+    const recurringIncomes = store.getUserRecurringIncomes(userId);
+    const recurringExpenses = store.getUserRecurringExpenses(userId);
     const budgets = store.getUserBudgets(userId);
     const goals = store.getUserGoals(userId);
     const debts = Array.from(store.debts.values()).filter(
@@ -102,6 +105,8 @@ export function createAppController(
       creditCards,
       categories,
       transactions,
+      recurringIncomes,
+      recurringExpenses,
       budgets,
       goals,
       debts,
@@ -574,6 +579,8 @@ export function createAppController(
             budgets: Array.isArray(reqBody.budgets) ? reqBody.budgets : undefined,
             goals: Array.isArray(reqBody.goals) ? reqBody.goals : undefined,
             debts: Array.isArray(reqBody.debts) ? reqBody.debts : undefined,
+            recurringIncomes: Array.isArray(reqBody.recurringIncomes) ? reqBody.recurringIncomes : undefined,
+            recurringExpenses: Array.isArray(reqBody.recurringExpenses) ? reqBody.recurringExpenses : undefined,
           });
         const csrfToken = generateCsrfToken(hydratedSid);
         const vault = encodeURIComponent(
@@ -687,13 +694,14 @@ export function createAppController(
 
       // Estado consolidado para atualização dinâmica da UI (isolado para actorUserId)
       if (method === 'GET' && pathname === '/api/v1/state') {
+        const queryMonth = parsedUrl.searchParams.get('month') || '2026-10';
         return {
           status: 200,
           headers: {
             ...secHeaders,
             'Content-Type': 'application/json; charset=utf-8',
           },
-          body: JSON.stringify(buildClientState(actorUserId)),
+          body: JSON.stringify(buildClientState(actorUserId, queryMonth)),
         };
       }
 
@@ -727,6 +735,22 @@ export function createAppController(
           status: 200,
           headers: { ...secHeaders, 'Content-Type': 'application/json; charset=utf-8' },
           body: JSON.stringify(store.getUserBudgets(actorUserId)),
+        };
+      }
+
+      if (method === 'GET' && pathname === '/api/v1/recurring-incomes') {
+        return {
+          status: 200,
+          headers: { ...secHeaders, 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(store.getUserRecurringIncomes(actorUserId)),
+        };
+      }
+
+      if (method === 'GET' && pathname === '/api/v1/recurring-expenses') {
+        return {
+          status: 200,
+          headers: { ...secHeaders, 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(store.getUserRecurringExpenses(actorUserId)),
         };
       }
 
@@ -914,6 +938,29 @@ export function createAppController(
           tags: tagsRaw,
           notes: sanitizeText(body.notes || '', 500),
         });
+        const isRecurring = Boolean(body.isRecurring);
+        if (isRecurring) {
+          const occDate = String(body.occurrenceDate || '2026-10-26T12:00:00.000Z');
+          const dayNum = parseInt(occDate.slice(8, 10), 10) || 10;
+          if (body.type === 'INCOME') {
+            store.createRecurringIncome(actorUserId, {
+              description: sanitizeText(body.description, 180),
+              amountCents: Number(body.amountCents || 0),
+              paymentDay: dayNum,
+              categoryId: body.categoryId ? String(body.categoryId) : undefined,
+              active: true,
+            });
+          } else {
+            store.createRecurringExpense(actorUserId, {
+              description: sanitizeText(body.description, 180),
+              defaultAmountCents: Number(body.amountCents || 0),
+              dueDay: dayNum,
+              categoryId: body.categoryId ? String(body.categoryId) : undefined,
+              valueType: body.valueType === 'variavel' ? 'variavel' : 'fixo',
+              active: true,
+            });
+          }
+        }
         return {
           status: 201,
           headers: {
@@ -987,6 +1034,130 @@ export function createAppController(
             'Content-Type': 'application/json; charset=utf-8',
           },
           body: JSON.stringify({ deleted: true, undoAvailable: true }),
+        };
+      }
+
+      // Pagar / Dar Baixa Rápida em Transação
+      const payTxMatch = pathname.match(
+        /^\/api\/v1\/transactions\/([^/]+)\/pay$/
+      );
+      if (method === 'POST' && payTxMatch) {
+        const actualAmountCents =
+          body.actualAmountCents !== undefined
+            ? Number(body.actualAmountCents)
+            : undefined;
+        const paid = store.payTransaction(
+          actorUserId,
+          payTxMatch[1],
+          actualAmountCents
+        );
+        return {
+          status: 200,
+          headers: {
+            ...secHeaders,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify(paid),
+        };
+      }
+
+      // Rendas Recorrentes / Salário
+      if (method === 'POST' && pathname === '/api/v1/recurring-incomes') {
+        const income = store.createRecurringIncome(actorUserId, {
+          description: sanitizeText(body.description, 180),
+          amountCents: Number(body.amountCents || 0),
+          paymentDay: Number(body.paymentDay || 5),
+          categoryId: body.categoryId ? String(body.categoryId) : undefined,
+          active: body.active !== undefined ? Boolean(body.active) : true,
+        });
+        const currentMonth = String(body.currentMonth || '2026-10');
+        store.generateMonthlyEntriesForMonth(actorUserId, currentMonth);
+        return {
+          status: 201,
+          headers: { ...secHeaders, 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(income),
+        };
+      }
+
+      const recIncomeIdMatch = pathname.match(
+        /^\/api\/v1\/recurring-incomes\/([^/]+)$/
+      );
+      if (method === 'PUT' && recIncomeIdMatch) {
+        const updated = store.updateRecurringIncome(
+          actorUserId,
+          recIncomeIdMatch[1],
+          {
+            description: body.description ? sanitizeText(body.description, 180) : undefined,
+            amountCents: body.amountCents !== undefined ? Number(body.amountCents) : undefined,
+            paymentDay: body.paymentDay !== undefined ? Number(body.paymentDay) : undefined,
+            categoryId: body.categoryId !== undefined ? String(body.categoryId) : undefined,
+            active: body.active !== undefined ? Boolean(body.active) : undefined,
+          }
+        );
+        return {
+          status: 200,
+          headers: { ...secHeaders, 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(updated),
+        };
+      }
+
+      if (method === 'DELETE' && recIncomeIdMatch) {
+        store.deleteRecurringIncome(actorUserId, recIncomeIdMatch[1]);
+        return {
+          status: 200,
+          headers: { ...secHeaders, 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify({ deleted: true }),
+        };
+      }
+
+      // Contas Fixas Mensais Recorrentes
+      if (method === 'POST' && pathname === '/api/v1/recurring-expenses') {
+        const expense = store.createRecurringExpense(actorUserId, {
+          description: sanitizeText(body.description, 180),
+          defaultAmountCents: Number(body.defaultAmountCents || 0),
+          dueDay: Number(body.dueDay || 10),
+          categoryId: body.categoryId ? String(body.categoryId) : undefined,
+          valueType: body.valueType === 'variavel' ? 'variavel' : 'fixo',
+          active: body.active !== undefined ? Boolean(body.active) : true,
+        });
+        const currentMonth = String(body.currentMonth || '2026-10');
+        store.generateMonthlyEntriesForMonth(actorUserId, currentMonth);
+        return {
+          status: 201,
+          headers: { ...secHeaders, 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(expense),
+        };
+      }
+
+      const recExpenseIdMatch = pathname.match(
+        /^\/api\/v1\/recurring-expenses\/([^/]+)$/
+      );
+      if (method === 'PUT' && recExpenseIdMatch) {
+        const updated = store.updateRecurringExpense(
+          actorUserId,
+          recExpenseIdMatch[1],
+          {
+            description: body.description ? sanitizeText(body.description, 180) : undefined,
+            defaultAmountCents: body.defaultAmountCents !== undefined ? Number(body.defaultAmountCents) : undefined,
+            dueDay: body.dueDay !== undefined ? Number(body.dueDay) : undefined,
+            categoryId: body.categoryId !== undefined ? String(body.categoryId) : undefined,
+            valueType: body.valueType === 'variavel' ? 'variavel' : 'fixo',
+            active: body.active !== undefined ? Boolean(body.active) : undefined,
+          }
+        );
+        return {
+          status: 200,
+          headers: { ...secHeaders, 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(updated),
+        };
+      }
+
+      if (method === 'DELETE' && recExpenseIdMatch) {
+        store.deleteRecurringExpense(actorUserId, recExpenseIdMatch[1]);
+        return {
+          status: 200,
+          headers: { ...secHeaders, 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify({ deleted: true }),
         };
       }
 

@@ -63,6 +63,12 @@ export const LUCIDE_ICONS: Record<string, string> = {
     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" x2="21" y1="10" y2="3"/><line x1="3" x2="10" y1="21" y2="14"/></svg>',
   xClose:
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+  repeat:
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>',
+  chevronLeft:
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>',
+  chevronRight:
+    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>',
 };
 
 // Padronização estrita de Chips/Pílulas para os 5 estados semânticos (sempre com ícone + texto)
@@ -264,19 +270,26 @@ export function renderDashboardServerSide(state: any): string {
     .join('');
 
   const upcomingHtml = (d.upcomingBills || [])
-    .map(
-      (b: any) => `
-      <div class="upcoming-row">
+    .map((b: any) => {
+      let urgencyChip = renderStateChip('pendente', 'Pendente');
+      if (b.urgency === 'atrasada') {
+        urgencyChip = renderStateChip('critico', 'Atrasada');
+      } else if (b.urgency === 'breve') {
+        urgencyChip = renderStateChip('atencao', 'Vence em breve');
+      }
+      return `
+      <div class="upcoming-row" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-color);">
         <div>
           <div style="font-weight:500;color:var(--text-primary);font-size:0.9rem;">${b.description}</div>
-          <div class="text-aux">Vencimento em ${formatDateBR(b.dueDate || b.occurrenceDate)}</div>
+          <div class="text-aux">Vencimento em ${formatDateBR(b.dueDate || b.occurrenceDate)} ${b.valueType === 'variavel' ? '• Estimado' : '• Fixo'}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          ${renderStateChip('pendente', 'Pendente')}
+        <div style="display:flex;align-items:center;gap:8px;">
+          ${urgencyChip}
           <span class="money-inline">${formatBRLFromCents(b.amountCents)}</span>
+          <button type="button" class="btn btn-sm" data-action="pay-bill" data-id="${b.id}" data-type="${b.valueType || 'fixo'}" data-desc="${b.description}" data-amount="${b.amountCents}" style="padding:4px 8px;font-size:0.75rem;">Dar baixa</button>
         </div>
-      </div>`
-    )
+      </div>`;
+    })
     .join('');
 
   return `<section aria-label="Visão Geral da Saúde Financeira" class="dashboard-grid">
@@ -291,6 +304,7 @@ export function renderDashboardServerSide(state: any): string {
         ${renderStateChip(availStatus.chipType, availStatus.badgeLabel)}
         <span class="text-aux">${availStatus.helperText}</span>
       </div>
+      ${d.fixedExpensesCommitmentPct !== undefined ? `<div class="text-aux" style="margin-top:6px;font-size:0.78rem;">Contas fixas: <strong>${formatBRLFromCents(d.totalFixedExpensesCents || 0)}</strong> (${formatPercentBR(d.fixedExpensesCommitmentPct)} da renda)</div>` : ''}
     </div>
 
     <div class="col-span-4 card card-priority-secondary">
@@ -1393,6 +1407,7 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
             <button type="button" class="nav-btn" data-nav-tab="goals">${LUCIDE_ICONS.target}<span>Metas financeiras</span></button>
             <button type="button" class="nav-btn" data-nav-tab="debts">${LUCIDE_ICONS.trendingDown}<span>Dívidas e simulador</span></button>
             <button type="button" class="nav-btn" data-nav-tab="reports">${LUCIDE_ICONS.barChart3}<span>Relatórios</span></button>
+            <button type="button" class="nav-btn" data-nav-tab="recurring">${LUCIDE_ICONS.repeat}<span>Salário e Fixos</span></button>
             <div class="nav-group-label" style="margin-top: 12px;">Conta e Privacidade</div>
             <button type="button" class="nav-btn" data-nav-tab="settings">${LUCIDE_ICONS.settings}<span>Configurações</span></button>
           </nav>
@@ -1416,10 +1431,15 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
             </div>
           </div>
           <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-            <div class="period-pill" aria-label="Período selecionado: Outubro de 2026">
-              ${LUCIDE_ICONS.calendar}
-              <span>Outubro de 2026</span>
+            <div class="period-pill-container" style="display:flex;align-items:center;gap:4px;background:var(--bg-muted);border:1px solid var(--border-color);border-radius:999px;padding:2px 6px;">
+              <button type="button" class="btn btn-sm" data-action="prev-month" aria-label="Mês anterior" style="padding:3px 6px;border:none;background:transparent;cursor:pointer;">${LUCIDE_ICONS.chevronLeft}</button>
+              <div id="header-period-label" class="period-pill" style="border:none;background:transparent;padding:2px 4px;font-size:0.82rem;font-weight:600;" aria-label="Período selecionado">
+                ${LUCIDE_ICONS.calendar}
+                <span id="current-month-display">Outubro de 2026</span>
+              </div>
+              <button type="button" class="btn btn-sm" data-action="next-month" aria-label="Próximo mês" style="padding:3px 6px;border:none;background:transparent;cursor:pointer;">${LUCIDE_ICONS.chevronRight}</button>
             </div>
+            <button type="button" class="btn btn-sm" data-nav-tab="recurring" title="Configurar Salário e Contas Fixas Recorrentes">${LUCIDE_ICONS.repeat}<span>Salário e Fixos</span></button>
             <button type="button" class="btn" data-action="toggle-theme" id="theme-toggle-btn" aria-label="Alternar entre modo claro e escuro">${LUCIDE_ICONS.moon}<span>Modo escuro</span></button>
             <button type="button" class="btn btn-primary" data-nav-tab="transactions">${LUCIDE_ICONS.plus}<span>Nova movimentação</span></button>
             <button type="button" class="btn" data-action="logout" title="Sair da conta atual ou trocar de usuário">${LUCIDE_ICONS.user}<span>Sair / Trocar conta</span></button>
@@ -1449,6 +1469,38 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
     var lastDeletedTxId = null;
     var txSearchFilter = "";
     var txStatusFilter = "";
+    var recurringSubTab = "income";
+    var selectedMonth = "2026-10";
+
+    function formatMonthNameBR(yearMonth) {
+      if (!yearMonth || typeof yearMonth !== "string") return "Outubro de 2026";
+      var parts = yearMonth.split("-");
+      if (parts.length !== 2) return "Outubro de 2026";
+      var year = parts[0];
+      var mIdx = parseInt(parts[1], 10) - 1;
+      var monthNames = [
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+      ];
+      return (monthNames[mIdx] || "Mês") + " de " + year;
+    }
+
+    function changeMonth(delta) {
+      var parts = selectedMonth.split("-");
+      var y = parseInt(parts[0], 10);
+      var m = parseInt(parts[1], 10) + delta;
+      if (m < 1) {
+        m = 12;
+        y -= 1;
+      } else if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+      selectedMonth = y + "-" + (m < 10 ? "0" + m : m);
+      var disp = document.getElementById("current-month-display");
+      if (disp) disp.textContent = formatMonthNameBR(selectedMonth);
+      refreshState();
+    }
 
     function escapeHtml(str) {
       return String(str == null ? "" : str)
@@ -1633,6 +1685,8 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
           creditCards: stateToSave.creditCards || [],
           categories: stateToSave.categories || [],
           transactions: stateToSave.transactions || [],
+          recurringIncomes: stateToSave.recurringIncomes || [],
+          recurringExpenses: stateToSave.recurringExpenses || [],
           budgets: stateToSave.budgets || [],
           goals: stateToSave.goals || [],
           debts: stateToSave.debts || (stateToSave.dashboard ? stateToSave.dashboard.debts : []) || [],
@@ -1717,6 +1771,7 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
               '<button type="button" class="nav-btn" data-nav-tab="goals">' + ICONS.target + '<span>Metas financeiras</span></button>' +
               '<button type="button" class="nav-btn" data-nav-tab="debts">' + ICONS.trendingDown + '<span>Dívidas e simulador</span></button>' +
               '<button type="button" class="nav-btn" data-nav-tab="reports">' + ICONS.barChart3 + '<span>Relatórios</span></button>' +
+              '<button type="button" class="nav-btn" data-nav-tab="recurring">' + ICONS.repeat + '<span>Salário e Fixos</span></button>' +
               '<div class="nav-group-label" style="margin-top: 12px;">Conta e Privacidade</div>' +
               '<button type="button" class="nav-btn" data-nav-tab="settings">' + ICONS.settings + '<span>Configurações</span></button>' +
             '</nav>' +
@@ -1740,10 +1795,15 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
               '</div>' +
             '</div>' +
             '<div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">' +
-              '<div class="period-pill" aria-label="Período selecionado: Outubro de 2026">' +
-                ICONS.calendar +
-                '<span>Outubro de 2026</span>' +
+              '<div class="period-pill-container" style="display:flex;align-items:center;gap:4px;background:var(--bg-muted);border:1px solid var(--border-color);border-radius:999px;padding:2px 6px;">' +
+                '<button type="button" class="btn btn-sm" data-action="prev-month" aria-label="Mês anterior" style="padding:3px 6px;border:none;background:transparent;cursor:pointer;">' + ICONS.chevronLeft + '</button>' +
+                '<div id="header-period-label" class="period-pill" style="border:none;background:transparent;padding:2px 4px;font-size:0.82rem;font-weight:600;" aria-label="Período selecionado">' +
+                  ICONS.calendar +
+                  '<span id="current-month-display">' + formatMonthNameBR(selectedMonth) + '</span>' +
+                '</div>' +
+                '<button type="button" class="btn btn-sm" data-action="next-month" aria-label="Próximo mês" style="padding:3px 6px;border:none;background:transparent;cursor:pointer;">' + ICONS.chevronRight + '</button>' +
               '</div>' +
+              '<button type="button" class="btn btn-sm" data-nav-tab="recurring" title="Configurar Salário e Contas Fixas Recorrentes">' + ICONS.repeat + '<span>Salário e Fixos</span></button>' +
               '<button type="button" class="btn" data-action="toggle-theme" id="theme-toggle-btn" aria-label="Alternar entre modo claro e escuro">' + ICONS.moon + '<span>Modo escuro</span></button>' +
               '<button type="button" class="btn btn-primary" data-nav-tab="transactions">' + ICONS.plus + '<span>Nova movimentação</span></button>' +
               '<button type="button" class="btn" data-action="logout" title="Sair da conta atual ou trocar de usuário">' + ICONS.user + '<span>Sair / Trocar conta</span></button>' +
@@ -1819,7 +1879,7 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
 
     async function refreshState() {
       showSkeletonLoading();
-      var res = await fetch("/api/v1/state");
+      var res = await fetch("/api/v1/state?month=" + encodeURIComponent(selectedMonth));
       if (res.ok) {
         appState = await res.json();
         appState.isAuthenticated = true;
@@ -1850,6 +1910,10 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
       var hdBadge = document.getElementById("header-account-badge");
       if (hdBadge) {
         hdBadge.innerHTML = ICONS.shieldCheck + '<span>' + (isDemo ? "Conta demonstração segura" : "Sessão pessoal autenticada") + '</span>';
+      }
+      var monthDisp = document.getElementById("current-month-display");
+      if (monthDisp) {
+        monthDisp.textContent = formatMonthNameBR(selectedMonth);
       }
     }
 
@@ -1883,6 +1947,7 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
       if (!root || !appState || !appState.dashboard) return;
 
       if (currentTab === "dashboard") root.innerHTML = renderDashboard();
+      else if (currentTab === "recurring") root.innerHTML = renderRecurringHub();
       else if (currentTab === "transactions") root.innerHTML = renderTransactions();
       else if (currentTab === "accounts") root.innerHTML = renderAccountsAndCards();
       else if (currentTab === "budgets") root.innerHTML = renderBudgets();
@@ -1962,9 +2027,16 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
       }).join("");
 
       var upcomingHtml = (d.upcomingBills || []).map(function(b) {
-        return '<div class="upcoming-row">' +
-          '<div><div style="font-weight:500;color:var(--text-primary);font-size:0.9rem;">' + escapeHtml(b.description) + '</div><div class="text-aux">Vencimento em ' + formatDateBR(b.dueDate || b.occurrenceDate) + '</div></div>' +
-          '<div style="display:flex;align-items:center;gap:10px;">' + renderChip("pendente") + '<span class="money-inline">' + formatBRL(b.amountCents) + '</span></div>' +
+        var chip = renderChip("pendente", "Pendente");
+        if (b.urgency === "atrasada") chip = renderChip("critico", "Atrasada");
+        else if (b.urgency === "breve") chip = renderChip("atencao", "Vence em breve");
+        return '<div class="upcoming-row" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-color);">' +
+          '<div><div style="font-weight:500;color:var(--text-primary);font-size:0.9rem;">' + escapeHtml(b.description) + '</div><div class="text-aux">Vencimento em ' + formatDateBR(b.dueDate || b.occurrenceDate) + (b.valueType === "variavel" ? " • Estimado" : " • Fixo") + '</div></div>' +
+          '<div style="display:flex;align-items:center;gap:8px;">' +
+            chip +
+            '<span class="money-inline">' + formatBRL(b.amountCents) + '</span>' +
+            '<button type="button" class="btn btn-sm" data-action="pay-bill" data-id="' + escapeHtml(b.id) + '" data-type="' + (b.valueType || "fixo") + '" data-desc="' + escapeHtml(b.description) + '" data-amount="' + b.amountCents + '" style="padding:4px 8px;font-size:0.75rem;">Dar baixa</button>' +
+          '</div>' +
         '</div>';
       }).join("");
 
@@ -2012,6 +2084,7 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
           '<div class="metric-header"><span class="card-title">Disponível para gastar no mês</span><span class="icon-badge icon-badge-teal">' + ICONS.sparkles + '</span></div>' +
           '<div class="card-value card-value-hero" style="color:' + (d.availableToSpendMonthCents < 0 ? "var(--color-danger)" : "var(--brand-primary)") + ';">' + formatBRL(d.availableToSpendMonthCents) + '</div>' +
           '<div class="metric-footer">' + renderChip(availStatus.chipType, availStatus.badgeLabel) + '<span class="text-aux">' + escapeHtml(availStatus.helperText) + '</span></div>' +
+          (d.fixedExpensesCommitmentPct !== undefined ? '<div class="text-aux" style="margin-top:6px;font-size:0.78rem;">Contas fixas: <strong>' + formatBRL(d.totalFixedExpensesCents || 0) + '</strong> (' + formatPercentBR(d.fixedExpensesCommitmentPct || 0) + ' da renda)</div>' : '') +
         '</div>' +
         '<div class="col-span-4 card card-priority-secondary">' +
           '<div class="metric-header"><span class="card-title">Resultado mensal (Outubro)</span><span class="icon-badge ' + (isPositive ? "icon-badge-green" : "icon-badge-red") + '">' + (isPositive ? ICONS.trendingUp : ICONS.trendingDown) + '</span></div>' +
@@ -2158,6 +2231,12 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
               '<div class="form-group"><label for="tx-status">Situação</label><select id="tx-status"><option value="PAID">Pago / Recebido</option><option value="PENDING">Pendente</option><option value="SCHEDULED">Agendado</option></select></div>' +
             '</div>' +
             '<div class="form-group"><label for="tx-tags">Tags opcionais</label><input id="tx-tags" class="input" placeholder="Ex: mercado, essencial, familia" /></div>' +
+            '<div class="form-group" style="margin-top:6px;margin-bottom:8px;">' +
+              '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500;font-size:0.86rem;color:var(--text-secondary);">' +
+                '<input type="checkbox" id="tx-is-recurring" style="width:16px;height:16px;accent-color:var(--brand-primary);" />' +
+                '<span>Fixar mensalmente (Recorrente todo mês)</span>' +
+              '</label>' +
+            '</div>' +
             '<button type="submit" class="btn btn-primary" style="width:100%;margin-top:6px;">Salvar movimentação</button>' +
           '</form>' +
         '</div>' +
@@ -2382,6 +2461,152 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
       '</div>';
     }
 
+    // Hub Completo: Configuração de Salário (Renda Recorrente) e Contas Fixas Mensais
+    function renderRecurringHub() {
+      var d = appState.dashboard || {};
+      var incList = appState.recurringIncomes || d.recurringIncomes || [];
+      var expList = appState.recurringExpenses || d.recurringExpenses || [];
+
+      var totalSalaryCents = 0;
+      var activeIncomesCount = 0;
+      for (var i = 0; i < incList.length; i++) {
+        if (incList[i].active !== false) {
+          totalSalaryCents += (Number(incList[i].amountCents) || 0);
+          activeIncomesCount++;
+        }
+      }
+
+      var totalFixedCents = 0;
+      var activeExpensesCount = 0;
+      for (var j = 0; j < expList.length; j++) {
+        if (expList[j].active !== false) {
+          totalFixedCents += (Number(expList[j].defaultAmountCents) || 0);
+          activeExpensesCount++;
+        }
+      }
+
+      var commitmentPct = totalSalaryCents > 0
+        ? Math.round((totalFixedCents / totalSalaryCents) * 1000) / 10
+        : 0;
+
+      var commitmentChip = commitmentPct > 60
+        ? renderChip("critico", "Alerta: " + formatPercentBR(commitmentPct) + " da renda")
+        : renderChip("positivo", "Saudável: " + formatPercentBR(commitmentPct) + " da renda");
+
+      var navPills = '<div class="subnav-pills" role="tablist" aria-label="Seções de Salário e Contas Fixas" style="margin-bottom:20px;">' +
+        '<button type="button" class="subnav-btn" role="tab" aria-selected="' + (recurringSubTab === "income" ? "true" : "false") + '" data-action="switch-recurring-subtab" data-subtab="income">' + ICONS.wallet + '<span>Meu Salário e Rendas Fixas (' + incList.length + ')</span></button>' +
+        '<button type="button" class="subnav-btn" role="tab" aria-selected="' + (recurringSubTab === "expenses" ? "true" : "false") + '" data-action="switch-recurring-subtab" data-subtab="expenses">' + ICONS.repeat + '<span>Minhas Contas Fixas Mensais (' + expList.length + ')</span></button>' +
+      '</div>';
+
+      var topSummaryHtml = '<div class="dashboard-grid" style="margin-bottom:20px;">' +
+        '<div class="col-span-4 card card-priority">' +
+          '<div class="metric-header"><span class="card-title">Rendas Fixas e Salário Líquido</span><span class="icon-badge icon-badge-teal">' + ICONS.wallet + '</span></div>' +
+          '<div class="card-value card-value-hero">' + formatBRL(totalSalaryCents) + '</div>' +
+          '<div class="metric-footer">' + renderChip("positivo", activeIncomesCount + " ativa" + (activeIncomesCount === 1 ? "" : "s")) + '<span class="text-aux">Recebimento mensal projetado</span></div>' +
+        '</div>' +
+        '<div class="col-span-4 card">' +
+          '<div class="metric-header"><span class="card-title">Total de Contas Fixas Previstas</span><span class="icon-badge">' + ICONS.repeat + '</span></div>' +
+          '<div class="card-value">' + formatBRL(totalFixedCents) + '</div>' +
+          '<div class="metric-footer">' + renderChip("estavel", activeExpensesCount + " fixa" + (activeExpensesCount === 1 ? "" : "s")) + '<span class="text-aux">Despesas que se repetem todo mês</span></div>' +
+        '</div>' +
+        '<div class="col-span-4 card">' +
+          '<div class="metric-header"><span class="card-title">Comprometimento da Renda</span><span class="icon-badge ' + (commitmentPct > 60 ? "icon-badge-red" : "icon-badge-green") + '">' + (commitmentPct > 60 ? ICONS.alertCircle : ICONS.checkCircle) + '</span></div>' +
+          '<div class="card-value" style="color:' + (commitmentPct > 60 ? "var(--color-danger)" : "var(--brand-primary)") + ';">' + formatPercentBR(commitmentPct) + '</div>' +
+          '<div class="metric-footer">' + commitmentChip + '<span class="text-aux">' + (commitmentPct > 60 ? "Gastos fixos superam 60% da renda" : "Dentro da margem orçamentária saudável") + '</span></div>' +
+        '</div>' +
+      '</div>';
+
+      var contentHtml = recurringSubTab === "expenses"
+        ? renderRecurringExpensesSection(expList)
+        : renderRecurringIncomesSection(incList);
+
+      return topSummaryHtml + navPills + contentHtml;
+    }
+
+    function renderRecurringIncomesSection(incList) {
+      var rowsHtml = incList.map(function(item) {
+        var isActive = item.active !== false;
+        return '<div class="subcard" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+          '<div>' +
+            '<div style="font-weight:600;color:var(--text-primary);font-size:0.95rem;">' + escapeHtml(item.description) + '</div>' +
+            '<div class="text-aux">Dia ' + item.paymentDay + ' de todo mês • ' + escapeHtml(item.category || "Salário") + '</div>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:10px;">' +
+            (isActive ? renderChip("positivo", "Ativo") : renderChip("pendente", "Pausado")) +
+            '<span class="money-inline" style="color:var(--color-success);font-size:1.05rem;">+' + formatBRL(item.amountCents) + '</span>' +
+            '<button type="button" class="btn btn-sm" data-action="toggle-recurring-income" data-id="' + escapeHtml(item.id) + '" data-active="' + (isActive ? "true" : "false") + '">' + (isActive ? "Pausar" : "Ativar") + '</button>' +
+            '<button type="button" class="btn btn-danger btn-sm" data-action="delete-recurring-income" data-id="' + escapeHtml(item.id) + '">Excluir</button>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+
+      return '<div class="dashboard-grid">' +
+        '<div class="col-span-5 card">' +
+          '<div class="section-header"><div><h2 class="section-title">Cadastrar Salário ou Renda Fixa</h2><p class="text-aux">Defina o salário líquido e recebimentos mensais que caem todo mês</p></div></div>' +
+          '<form data-form="create-recurring-income">' +
+            '<div class="form-group"><label for="rec-inc-desc">Descrição do recebimento</label><input id="rec-inc-desc" class="input" required placeholder="Ex: Salário Líquido Mensal, Vale Refeição, Aluguel Recebido..." /></div>' +
+            '<div class="form-grid-2">' +
+              '<div class="form-group"><label for="rec-inc-amount">Valor líquido (R$)</label><input id="rec-inc-amount" type="number" step="0.01" min="0.01" class="input" required placeholder="5500.00" /></div>' +
+              '<div class="form-group"><label for="rec-inc-day">Dia do recebimento (1 a 31)</label><input id="rec-inc-day" type="number" min="1" max="31" class="input" required value="5" /></div>' +
+            '</div>' +
+            '<div class="form-group"><label for="rec-inc-cat">Categoria da receita</label><select id="rec-inc-cat"><option value="Salário">Salário</option><option value="Benefícios">Benefícios / Vale</option><option value="Renda Extra">Renda Extra</option><option value="Investimentos">Rendimento de Investimentos</option><option value="Outros">Outros</option></select></div>' +
+            '<button type="submit" class="btn btn-primary" style="width:100%;margin-top:8px;">' + ICONS.plus + '<span>Salvar Renda Recorrente</span></button>' +
+          '</form>' +
+        '</div>' +
+        '<div class="col-span-7 card">' +
+          '<div class="section-header"><div><h2 class="section-title">Rendas Recorrentes Ativas (' + incList.length + ')</h2><p class="text-aux">Valores creditados automaticamente nas projeções mensais</p></div></div>' +
+          (rowsHtml || '<p class="text-aux" style="padding:24px 0;">Nenhuma renda recorrente cadastrada ainda. Adicione seu salário ou vale ao lado.</p>') +
+        '</div>' +
+      '</div>';
+    }
+
+    function renderRecurringExpensesSection(expList) {
+      var catOptions = appState.categories.map(function(c) {
+        return '<option value="' + escapeHtml(c.id) + '">' + escapeHtml(c.name) + '</option>';
+      }).join("");
+
+      var rowsHtml = expList.map(function(item) {
+        var isActive = item.active !== false;
+        var cat = appState.categories.find(function(c) { return c.id === item.categoryId; });
+        var catName = cat ? cat.name : "Moradia";
+        var isVariable = item.valueType === "variavel";
+        return '<div class="subcard" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+          '<div>' +
+            '<div style="font-weight:600;color:var(--text-primary);font-size:0.95rem;">' + escapeHtml(item.description) + '</div>' +
+            '<div class="text-aux">Vencimento dia ' + item.dueDay + ' • ' + escapeHtml(catName) + ' • <strong style="color:var(--text-secondary);">' + (isVariable ? "Estimado / Variável" : "Valor Fixo") + '</strong></div>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:10px;">' +
+            (isActive ? renderChip("positivo", "Ativo") : renderChip("pendente", "Pausado")) +
+            '<span class="money-inline" style="font-size:1.05rem;">' + formatBRL(item.defaultAmountCents) + '</span>' +
+            '<button type="button" class="btn btn-sm" data-action="toggle-recurring-expense" data-id="' + escapeHtml(item.id) + '" data-active="' + (isActive ? "true" : "false") + '">' + (isActive ? "Pausar" : "Ativar") + '</button>' +
+            '<button type="button" class="btn btn-danger btn-sm" data-action="delete-recurring-expense" data-id="' + escapeHtml(item.id) + '">Excluir</button>' +
+          '</div>' +
+        '</div>';
+      }).join("");
+
+      return '<div class="dashboard-grid">' +
+        '<div class="col-span-5 card">' +
+          '<div class="section-header"><div><h2 class="section-title">Cadastrar Conta Fixa Mensal</h2><p class="text-aux">Contas que vencem todos os meses (aluguel, condomínio, luz, internet, etc.)</p></div></div>' +
+          '<form data-form="create-recurring-expense">' +
+            '<div class="form-group"><label for="rec-exp-desc">Descrição da conta fixa</label><input id="rec-exp-desc" class="input" required placeholder="Ex: Aluguel / Condomínio, Internet Fibra, Energia Elétrica..." /></div>' +
+            '<div class="form-grid-2">' +
+              '<div class="form-group"><label for="rec-exp-amount">Valor padrão / estimado (R$)</label><input id="rec-exp-amount" type="number" step="0.01" min="0.01" class="input" required placeholder="129.90" /></div>' +
+              '<div class="form-group"><label for="rec-exp-day">Dia do vencimento (1 a 31)</label><input id="rec-exp-day" type="number" min="1" max="31" class="input" required value="10" /></div>' +
+            '</div>' +
+            '<div class="form-grid-2">' +
+              '<div class="form-group"><label for="rec-exp-cat">Categoria</label><select id="rec-exp-cat">' + catOptions + '</select></div>' +
+              '<div class="form-group"><label for="rec-exp-type">Natureza do valor</label><select id="rec-exp-type"><option value="fixo">Fixo (Valor exato todo mês)</option><option value="variavel">Estimado / Variável (Luz, água, etc.)</option></select></div>' +
+            '</div>' +
+            '<button type="submit" class="btn btn-primary" style="width:100%;margin-top:8px;">' + ICONS.plus + '<span>Salvar Conta Fixa</span></button>' +
+          '</form>' +
+        '</div>' +
+        '<div class="col-span-7 card">' +
+          '<div class="section-header"><div><h2 class="section-title">Contas Fixas Cadastradas (' + expList.length + ')</h2><p class="text-aux">Instanciadas automaticamente a cada novo mês no extrato e vencimentos</p></div></div>' +
+          (rowsHtml || '<p class="text-aux" style="padding:24px 0;">Nenhuma conta fixa cadastrada ainda. Adicione seu aluguel, condomínio ou internet ao lado.</p>') +
+        '</div>' +
+      '</div>';
+    }
+
     // Área unificada de Configurações agrupando Perfil, Segurança & MFA e Privacidade & LGPD
     function renderSettingsHub() {
       var navPills = '<div class="subnav-pills" role="tablist" aria-label="Seções de Configurações">' +
@@ -2513,6 +2738,74 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
 
       if (action === "toggle-theme") {
         toggleTheme();
+      } else if (action === "prev-month") {
+        changeMonth(-1);
+      } else if (action === "next-month") {
+        changeMonth(1);
+      } else if (action === "switch-recurring-subtab") {
+        recurringSubTab = actionBtn.getAttribute("data-subtab") || "income";
+        renderCurrentTab();
+      } else if (action === "pay-bill" && id) {
+        var billDesc = actionBtn.getAttribute("data-desc") || "Conta";
+        var billType = actionBtn.getAttribute("data-type") || "fixo";
+        var billAmount = Number(actionBtn.getAttribute("data-amount")) || 0;
+        var actualAmountCents = undefined;
+
+        if (billType === "variavel") {
+          var currentValReais = (billAmount / 100).toFixed(2).replace(".", ",");
+          var inputVal = prompt("Conta de valor estimado/variável (" + billDesc + "). Confirme ou informe o valor final pago em R$:", currentValReais);
+          if (inputVal === null) return;
+          var parsed = parseFloat(String(inputVal).replace(/\./g, "").replace(",", "."));
+          if (!isNaN(parsed) && parsed > 0) {
+            actualAmountCents = Math.round(parsed * 100);
+          }
+        } else {
+          if (!confirm("Confirmar baixa e pagamento da conta '" + billDesc + "' (" + formatBRL(billAmount) + ")?")) return;
+        }
+
+        var payRes = await fetch("/api/v1/transactions/" + id + "/pay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": window.__CSRF_TOKEN__ },
+          body: JSON.stringify({ actualAmountCents: actualAmountCents })
+        });
+        if (payRes.ok) {
+          showToast("Conta '" + billDesc + "' baixada e marcada como paga com sucesso!");
+          await refreshState();
+        }
+      } else if (action === "toggle-recurring-income" && id) {
+        var isCurrentlyActive = actionBtn.getAttribute("data-active") === "true";
+        await fetch("/api/v1/recurring-incomes/" + id, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": window.__CSRF_TOKEN__ },
+          body: JSON.stringify({ active: !isCurrentlyActive })
+        });
+        showToast("Renda fixa " + (isCurrentlyActive ? "pausada" : "ativada") + " com sucesso!");
+        await refreshState();
+      } else if (action === "delete-recurring-income" && id) {
+        if (!confirm("Deseja realmente remover esta renda recorrente?")) return;
+        await fetch("/api/v1/recurring-incomes/" + id, {
+          method: "DELETE",
+          headers: { "X-CSRF-Token": window.__CSRF_TOKEN__ }
+        });
+        showToast("Renda recorrente removida com sucesso!");
+        await refreshState();
+      } else if (action === "toggle-recurring-expense" && id) {
+        var isExpCurrentlyActive = actionBtn.getAttribute("data-active") === "true";
+        await fetch("/api/v1/recurring-expenses/" + id, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": window.__CSRF_TOKEN__ },
+          body: JSON.stringify({ active: !isExpCurrentlyActive })
+        });
+        showToast("Conta fixa " + (isExpCurrentlyActive ? "pausada" : "ativada") + " com sucesso!");
+        await refreshState();
+      } else if (action === "delete-recurring-expense" && id) {
+        if (!confirm("Deseja realmente remover esta conta fixa?")) return;
+        await fetch("/api/v1/recurring-expenses/" + id, {
+          method: "DELETE",
+          headers: { "X-CSRF-Token": window.__CSRF_TOKEN__ }
+        });
+        showToast("Conta fixa removida com sucesso!");
+        await refreshState();
       } else if (action === "switch-auth-tab") {
         switchAuthTab(actionBtn.getAttribute("data-auth-tab") || "login");
       } else if (action === "demo-login") {
@@ -2662,6 +2955,8 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
             creditCards: savedFinancial.creditCards || [],
             categories: savedFinancial.categories || [],
             transactions: savedFinancial.transactions || [],
+            recurringIncomes: savedFinancial.recurringIncomes || [],
+            recurringExpenses: savedFinancial.recurringExpenses || [],
             budgets: savedFinancial.budgets || [],
             goals: savedFinancial.goals || [],
             debts: savedFinancial.debts || []
@@ -2828,8 +3123,46 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
         }
         switchAuthTab("login");
         showToast(rstData.message || "Senha redefinida! Faça login com a nova senha.");
+      } else if (formType === "create-recurring-income") {
+        var incAmountReais = parseFloat(document.getElementById("rec-inc-amount").value || "0");
+        var incPayload = {
+          description: document.getElementById("rec-inc-desc").value,
+          amountCents: Math.round(incAmountReais * 100),
+          paymentDay: parseInt(document.getElementById("rec-inc-day").value || "5", 10),
+          categoryId: document.getElementById("rec-inc-cat").value,
+          currentMonth: selectedMonth
+        };
+        var incRes = await fetch("/api/v1/recurring-incomes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": window.__CSRF_TOKEN__ },
+          body: JSON.stringify(incPayload)
+        });
+        if (incRes.ok) {
+          showToast("Renda fixa / Salário cadastrado com sucesso!");
+          await refreshState();
+        }
+      } else if (formType === "create-recurring-expense") {
+        var expAmountReais = parseFloat(document.getElementById("rec-exp-amount").value || "0");
+        var expPayload = {
+          description: document.getElementById("rec-exp-desc").value,
+          defaultAmountCents: Math.round(expAmountReais * 100),
+          dueDay: parseInt(document.getElementById("rec-exp-day").value || "10", 10),
+          categoryId: document.getElementById("rec-exp-cat").value,
+          valueType: document.getElementById("rec-exp-type").value,
+          currentMonth: selectedMonth
+        };
+        var expRes = await fetch("/api/v1/recurring-expenses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": window.__CSRF_TOKEN__ },
+          body: JSON.stringify(expPayload)
+        });
+        if (expRes.ok) {
+          showToast("Conta fixa cadastrada com sucesso!");
+          await refreshState();
+        }
       } else if (formType === "create-transaction") {
         var amountReais = parseFloat(document.getElementById("tx-amount").value || "0");
+        var isRecurringChecked = Boolean(document.getElementById("tx-is-recurring") && document.getElementById("tx-is-recurring").checked);
         var payload = {
           description: document.getElementById("tx-desc").value,
           type: document.getElementById("tx-type").value,
@@ -2840,7 +3173,10 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
           installmentTotal: parseInt(document.getElementById("tx-inst").value || "1", 10),
           status: document.getElementById("tx-status").value,
           tags: document.getElementById("tx-tags").value,
-          occurrenceDate: "2026-10-26T12:00:00.000Z"
+          occurrenceDate: selectedMonth + "-10T12:00:00.000Z",
+          isRecurring: isRecurringChecked,
+          recurrenceDay: 10,
+          valueType: "fixo"
         };
         var res = await fetch("/api/v1/transactions", {
           method: "POST",
@@ -3006,6 +3342,8 @@ export function renderWebAppHtml(initialState: any, csrfToken: string): string {
             creditCards: savedFinancial.creditCards || [],
             categories: savedFinancial.categories || [],
             transactions: savedFinancial.transactions || [],
+            recurringIncomes: savedFinancial.recurringIncomes || [],
+            recurringExpenses: savedFinancial.recurringExpenses || [],
             budgets: savedFinancial.budgets || [],
             goals: savedFinancial.goals || [],
             debts: savedFinancial.debts || []

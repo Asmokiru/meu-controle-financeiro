@@ -78,6 +78,8 @@ async function testProd() {
       creditCards: state1.creditCards,
       categories: state1.categories,
       transactions: state1.transactions,
+      recurringIncomes: state1.recurringIncomes || [],
+      recurringExpenses: state1.recurringExpenses || [],
       budgets: state1.budgets,
       goals: state1.goals,
       debts: state1.debts
@@ -85,20 +87,82 @@ async function testProd() {
   });
   console.log('6. Status Re-login / Hidratação:', rHyd.status);
   const hydData = await rHyd.json();
+  const hydCookie = rHyd.headers.get('set-cookie');
   console.log('   Autenticado após re-login:', hydData.authenticated);
   console.log('   Saldo preservado após logout (50000):', hydData.state.dashboard.totalBalanceCents);
   console.log('   Conta NÃO é demo (Mariana isolada):', !hydData.state.dashboard.isDemoAccount);
 
-  // 7. Teste de login na Conta Demonstração
+  // 7. Teste de Salário Recorrente e Contas Fixas Mensais
+  const rSalary = await fetch(base + '/api/v1/recurring-incomes', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Cookie': hydCookie,
+      'X-CSRF-Token': hydData.csrfToken
+    },
+    body: JSON.stringify({
+      description: 'Salário Fixo Mensal',
+      amountCents: 500000,
+      paymentDay: 5,
+      categoryId: 'Salário',
+      currentMonth: '2026-10'
+    })
+  });
+  console.log('7. Status Cadastro Salário Recorrente:', rSalary.status);
+
+  const rFixedExp = await fetch(base + '/api/v1/recurring-expenses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Cookie': hydCookie,
+      'X-CSRF-Token': hydData.csrfToken
+    },
+    body: JSON.stringify({
+      description: 'Internet Fibra Óptica',
+      defaultAmountCents: 12000,
+      dueDay: 10,
+      valueType: 'fixo',
+      currentMonth: '2026-10'
+    })
+  });
+  console.log('   Status Cadastro Conta Fixa:', rFixedExp.status);
+
+  const rStateMonth = await fetch(base + '/api/v1/state?month=2026-10', {
+    headers: { 'Cookie': hydCookie }
+  });
+  const stateMonthData = await rStateMonth.json();
+  console.log('   Salário computado (500000):', stateMonthData.dashboard.totalSalaryCents);
+  console.log('   Contas fixas computadas (12000):', stateMonthData.dashboard.totalFixedExpensesCents);
+  console.log('   Comprometimento da renda (2.4%):', stateMonthData.dashboard.fixedExpensesCommitmentPct + '%');
+  console.log('   Conta pendente em Próximos Vencimentos:', stateMonthData.dashboard.upcomingBills.some(b => b.description === 'Internet Fibra Óptica'));
+
+  // Baixa rápida na conta fixa
+  const billToPay = stateMonthData.dashboard.upcomingBills.find(b => b.description === 'Internet Fibra Óptica');
+  if (billToPay) {
+    const rPay = await fetch(base + '/api/v1/transactions/' + billToPay.id + '/pay', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': hydCookie,
+        'X-CSRF-Token': hydData.csrfToken
+      },
+      body: JSON.stringify({ actualAmountCents: 12000 })
+    });
+    console.log('   Status Baixa Rápida:', rPay.status);
+  }
+
+  // 8. Teste de login na Conta Demonstração
   const rDemo = await fetch(base + '/api/v1/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ demo: true })
   });
   const demoData = await rDemo.json();
-  console.log('7. Conta Demo autenticada:', demoData.authenticated);
+  console.log('8. Conta Demo autenticada:', demoData.authenticated);
   console.log('   Usuário Demo:', demoData.state.user.name);
-  console.log('   Disponível real calculado (negativo por excesso de gastos):', demoData.state.dashboard.availableToSpendMonthCents);
+  console.log('   Rendas fixas demo pre-cadastradas:', demoData.state.recurringIncomes.length >= 2);
+  console.log('   Contas fixas demo pre-cadastradas:', demoData.state.recurringExpenses.length >= 4);
+  console.log('   Disponível real calculado:', demoData.state.dashboard.availableToSpendMonthCents);
   console.log('   Status do disponível:', demoData.state.dashboard.availableToSpendStatus.badgeLabel);
   console.log('   Insights desduplicados (Alimentação apenas 1x):', demoData.state.dashboard.structuredInsights.filter(i => i.description.includes('Alimentação')).length === 1);
   console.log('--- FIM DO TESTE E2E EM PRODUÇÃO: SUCESSO TOTAL ---');

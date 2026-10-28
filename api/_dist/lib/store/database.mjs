@@ -217,7 +217,38 @@ export class ValidationError extends Error {
                 
                           
                             
+                                    
+                                     
+                        
+                                  
                            
+                    
+                    
+ 
+
+                                        
+             
+                 
+                      
+                      
+                     
+                     
+                        
+                  
+                    
+                    
+ 
+
+                                         
+             
+                 
+                      
+                             
+                 
+                     
+                        
+                                 
+                  
                     
                     
  
@@ -407,6 +438,8 @@ export class FinancialPlatformStore {
          subcategories = new Map                           ();
          transactions = new Map                           ();
          installments = new Map                                      ();
+         recurringIncomes = new Map                               ();
+         recurringExpenses = new Map                                ();
          budgets = new Map                      ();
          goals = new Map                    ();
          goalContributions = new Map                                ();
@@ -1333,6 +1366,10 @@ export class FinancialPlatformStore {
                                 
                       
                      
+                                        
+                                         
+                            
+                                      
      
   )   
                                    
@@ -1411,6 +1448,10 @@ export class FinancialPlatformStore {
       notes: input.notes || '',
       autoClassified,
       userCorrectedCat: false,
+      recurringIncomeId: input.recurringIncomeId || null,
+      recurringExpenseId: input.recurringExpenseId || null,
+      isFixedCost: Boolean(input.isFixedCost),
+      valueType: input.valueType,
       deletedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -1658,6 +1699,317 @@ export class FinancialPlatformStore {
       metadata: { count: txs.length, month },
     });
     return header + rows.join('\n');
+  }
+
+  // --------------------------------------------------------------------------
+  // 4.1 Rendas Fixas (Salário) e Contas Fixas Mensais Recorrentes
+  // --------------------------------------------------------------------------
+
+         getUserRecurringIncomes(userId        )                          {
+    return Array.from(this.recurringIncomes.values())
+      .filter((i) => i.userId === userId)
+      .sort((a, b) => a.paymentDay - b.paymentDay);
+  }
+
+         createRecurringIncome(
+    userId        ,
+    data   
+                          
+                          
+                         
+                          
+                       
+     
+  )                        {
+    if (!data.description || data.description.trim().length === 0) {
+      throw new ValidationError('A descrição da renda fixa ou salário é obrigatória.');
+    }
+    if (typeof data.amountCents !== 'number' || data.amountCents <= 0) {
+      throw new ValidationError('O valor da renda fixa deve ser maior que zero.');
+    }
+    const cleanDay = Math.min(31, Math.max(1, parseInt(String(data.paymentDay || 5), 10)));
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const income                        = {
+      id,
+      userId,
+      description: data.description.trim(),
+      amountCents: Math.round(data.amountCents),
+      paymentDay: cleanDay,
+      categoryId: data.categoryId || '',
+      active: data.active !== false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.recurringIncomes.set(id, income);
+    this.recordAudit({
+      userId,
+      action: 'RECURRING_INCOME_CREATED',
+      resourceType: 'RecurringIncome',
+      resourceId: id,
+      metadata: { description: income.description, amountCents: income.amountCents },
+    });
+    return income;
+  }
+
+         updateRecurringIncome(
+    userId        ,
+    id        ,
+    data           
+                          
+                          
+                         
+                         
+                      
+      
+  )                        {
+    const income = this.recurringIncomes.get(id);
+    if (!income) throw new ValidationError('Renda fixa não encontrada.');
+    this.assertOwnership(income.userId, userId, 'RecurringIncome', id);
+
+    if (data.description !== undefined) income.description = data.description.trim();
+    if (data.amountCents !== undefined && data.amountCents > 0) {
+      income.amountCents = Math.round(data.amountCents);
+    }
+    if (data.paymentDay !== undefined) {
+      income.paymentDay = Math.min(31, Math.max(1, parseInt(String(data.paymentDay), 10)));
+    }
+    if (data.categoryId !== undefined) income.categoryId = data.categoryId;
+    if (data.active !== undefined) income.active = Boolean(data.active);
+    income.updatedAt = new Date().toISOString();
+
+    return income;
+  }
+
+         deleteRecurringIncome(userId        , id        )       {
+    const income = this.recurringIncomes.get(id);
+    if (!income) return;
+    this.assertOwnership(income.userId, userId, 'RecurringIncome', id);
+    this.recurringIncomes.delete(id);
+  }
+
+         getUserRecurringExpenses(userId        )                           {
+    return Array.from(this.recurringExpenses.values())
+      .filter((e) => e.userId === userId)
+      .sort((a, b) => a.dueDay - b.dueDay);
+  }
+
+         createRecurringExpense(
+    userId        ,
+    data   
+                          
+                                 
+                     
+                          
+                                      
+                       
+     
+  )                         {
+    if (!data.description || data.description.trim().length === 0) {
+      throw new ValidationError('A descrição da conta fixa é obrigatória.');
+    }
+    if (typeof data.defaultAmountCents !== 'number' || data.defaultAmountCents <= 0) {
+      throw new ValidationError('O valor padrão da conta fixa deve ser maior que zero.');
+    }
+    const cleanDay = Math.min(31, Math.max(1, parseInt(String(data.dueDay || 10), 10)));
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const expense                         = {
+      id,
+      userId,
+      description: data.description.trim(),
+      defaultAmountCents: Math.round(data.defaultAmountCents),
+      dueDay: cleanDay,
+      categoryId: data.categoryId || '',
+      valueType: data.valueType === 'variavel' ? 'variavel' : 'fixo',
+      active: data.active !== false,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.recurringExpenses.set(id, expense);
+    this.recordAudit({
+      userId,
+      action: 'RECURRING_EXPENSE_CREATED',
+      resourceType: 'RecurringExpense',
+      resourceId: id,
+      metadata: { description: expense.description, defaultAmountCents: expense.defaultAmountCents },
+    });
+    return expense;
+  }
+
+         updateRecurringExpense(
+    userId        ,
+    id        ,
+    data           
+                          
+                                 
+                     
+                         
+                                     
+                      
+      
+  )                         {
+    const expense = this.recurringExpenses.get(id);
+    if (!expense) throw new ValidationError('Conta fixa não encontrada.');
+    this.assertOwnership(expense.userId, userId, 'RecurringExpense', id);
+
+    if (data.description !== undefined) expense.description = data.description.trim();
+    if (data.defaultAmountCents !== undefined && data.defaultAmountCents > 0) {
+      expense.defaultAmountCents = Math.round(data.defaultAmountCents);
+    }
+    if (data.dueDay !== undefined) {
+      expense.dueDay = Math.min(31, Math.max(1, parseInt(String(data.dueDay), 10)));
+    }
+    if (data.categoryId !== undefined) expense.categoryId = data.categoryId;
+    if (data.valueType !== undefined) {
+      expense.valueType = data.valueType === 'variavel' ? 'variavel' : 'fixo';
+    }
+    if (data.active !== undefined) expense.active = Boolean(data.active);
+    expense.updatedAt = new Date().toISOString();
+
+    return expense;
+  }
+
+         deleteRecurringExpense(userId        , id        )       {
+    const expense = this.recurringExpenses.get(id);
+    if (!expense) return;
+    this.assertOwnership(expense.userId, userId, 'RecurringExpense', id);
+    this.recurringExpenses.delete(id);
+  }
+
+  /**
+   * Instancia automaticamente as rendas fixas e despesas mensais para a competência YYYY-MM
+   * caso ainda não tenham sido geradas, com ajuste seguro para o último dia válido em meses curtos.
+   */
+         generateMonthlyEntriesForMonth(userId        , yearMonth        )       {
+    if (!/^\d{4}-\d{2}$/.test(yearMonth)) return;
+    const [year, month] = yearMonth.split('-').map(Number);
+    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const existingMonthTxs = this.getUserTransactions(userId, { month: yearMonth });
+
+    // 1. Gera entradas para Rendas Recorrentes / Salário
+    const activeIncomes = this.getUserRecurringIncomes(userId).filter((i) => i.active);
+    for (const inc of activeIncomes) {
+      const alreadyCreated = existingMonthTxs.some(
+        (t) =>
+          t.type === 'INCOME' &&
+          (t.recurringIncomeId === inc.id ||
+            t.description.toLowerCase() === inc.description.toLowerCase())
+      );
+      if (!alreadyCreated) {
+        const actualDay = Math.min(inc.paymentDay, daysInMonth);
+        const dayStr = String(actualDay).padStart(2, '0');
+        const isoDate = `${yearMonth}-${dayStr}T10:00:00.000Z`;
+        let matchedCat = inc.categoryId;
+        if (matchedCat && (!this.categories.has(matchedCat) || this.categories.get(matchedCat)?.userId !== userId)) {
+          const userCat = Array.from(this.categories.values()).find(
+            (c) => c.userId === userId && (c.name.toLowerCase() === matchedCat.toLowerCase() || c.slug.toLowerCase() === matchedCat.toLowerCase())
+          );
+          matchedCat = userCat ? userCat.id : undefined;
+        }
+        if (!matchedCat) {
+          matchedCat = Array.from(this.categories.values()).find(
+            (c) => c.userId === userId && (c.slug === 'salario' || c.name.toLowerCase().includes('salário') || c.type === 'INCOME')
+          )?.id;
+        }
+        this.createTransaction(userId, {
+          type: 'INCOME',
+          amountCents: inc.amountCents,
+          description: inc.description,
+          occurrenceDate: isoDate,
+          paymentMethod: 'TRANSFER',
+          categoryId: matchedCat,
+          status: 'PAID',
+          recurrence: 'MONTHLY',
+          tags: ['salario', 'fixo'],
+          recurringIncomeId: inc.id,
+        });
+      }
+    }
+
+    // 2. Gera entradas para Contas Fixas Mensais
+    const activeExpenses = this.getUserRecurringExpenses(userId).filter((e) => e.active);
+    for (const exp of activeExpenses) {
+      const alreadyCreated = existingMonthTxs.some(
+        (t) =>
+          (t.type === 'EXPENSE' || t.type === 'DEBT_PAYMENT') &&
+          (t.recurringExpenseId === exp.id ||
+            t.description.toLowerCase() === exp.description.toLowerCase())
+      );
+      if (!alreadyCreated) {
+        const actualDay = Math.min(exp.dueDay, daysInMonth);
+        const dayStr = String(actualDay).padStart(2, '0');
+        const isoDate = `${yearMonth}-${dayStr}T12:00:00.000Z`;
+        let matchedCat = exp.categoryId;
+        if (matchedCat && (!this.categories.has(matchedCat) || this.categories.get(matchedCat)?.userId !== userId)) {
+          const userCat = Array.from(this.categories.values()).find(
+            (c) => c.userId === userId && (c.name.toLowerCase() === matchedCat.toLowerCase() || c.slug.toLowerCase() === matchedCat.toLowerCase())
+          );
+          matchedCat = userCat ? userCat.id : undefined;
+        }
+        if (!matchedCat) {
+          matchedCat = Array.from(this.categories.values()).find(
+            (c) => c.userId === userId && (c.slug === 'moradia' || c.type === 'EXPENSE')
+          )?.id;
+        }
+        this.createTransaction(userId, {
+          type: 'EXPENSE',
+          amountCents: exp.defaultAmountCents,
+          description: exp.description,
+          occurrenceDate: isoDate,
+          dueDate: isoDate,
+          paymentMethod: 'BOLETO',
+          categoryId: matchedCat,
+          status: 'PENDING',
+          recurrence: 'MONTHLY',
+          tags: ['fixo', exp.valueType === 'variavel' ? 'estimado' : 'fixo-exato'],
+          recurringExpenseId: exp.id,
+          valueType: exp.valueType,
+          isFixedCost: true,
+        });
+      }
+    }
+  }
+
+  /**
+   * Marca uma movimentação pendente como paga com 1 clique,
+   * permitindo ajuste do valor efetivo para contas variáveis.
+   */
+         payTransaction(
+    userId        ,
+    transactionId        ,
+    actualAmountCents         
+  )                    {
+    const tx = this.transactions.get(transactionId);
+    if (!tx) throw new ValidationError('Movimentação não encontrada.');
+    this.assertOwnership(tx.userId, userId, 'Transaction', transactionId);
+
+    if (typeof actualAmountCents === 'number' && actualAmountCents > 0) {
+      tx.amountCents = Math.round(actualAmountCents);
+    }
+    tx.status = 'PAID';
+    tx.updatedAt = new Date().toISOString();
+
+    if (tx.originAccountId) {
+      const acc = this.accounts.get(tx.originAccountId);
+      if (acc && acc.userId === userId) {
+        if (tx.type === 'INCOME') {
+          acc.currentBalanceCents += tx.amountCents;
+        } else {
+          acc.currentBalanceCents -= tx.amountCents;
+        }
+      }
+    }
+
+    this.recordAudit({
+      userId,
+      action: 'TRANSACTION_PAID',
+      resourceType: 'Transaction',
+      resourceId: tx.id,
+      metadata: { amountCents: tx.amountCents, description: tx.description },
+    });
+
+    return tx;
   }
 
   // --------------------------------------------------------------------------
@@ -1989,6 +2341,8 @@ export class FinancialPlatformStore {
       0
     );
 
+    this.generateMonthlyEntriesForMonth(userId, referenceMonth);
+
     const allUserTxs = this.getUserTransactions(userId);
     const unlinkedNetBalanceCents = allUserTxs
       .filter((t) => t.status === 'PAID' && !t.originAccountId && !t.creditCardId)
@@ -2006,7 +2360,9 @@ export class FinancialPlatformStore {
     const totalBalanceCents = accountsBalanceCents + unlinkedNetBalanceCents;
 
     const monthTxs = this.getUserTransactions(userId, { month: referenceMonth });
-    const prevMonth = '2026-09';
+    const [refY, refM] = referenceMonth.split('-').map(Number);
+    const prevDate = new Date(Date.UTC(refY, refM - 2, 1));
+    const prevMonth = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
     const prevMonthTxs = this.getUserTransactions(userId, { month: prevMonth });
 
     const monthIncomeCents = monthTxs
@@ -2200,6 +2556,20 @@ export class FinancialPlatformStore {
     );
 
     // Próximos vencimentos: integra contas pendentes/agendadas + faturas abertas de cartões de crédito, ordenadas por data
+    const refNow = new Date('2026-10-26T12:00:00.000Z');
+    const computeUrgency = (dateStr        , status        ) => {
+      const d = new Date(dateStr);
+      const diffMs = d.getTime() - refNow.getTime();
+      const diffDays = Math.ceil(diffMs / (24 * 3600 * 1000));
+      if (diffDays < 0 || status === 'OVERDUE') {
+        return { urgencyBadge: 'atrasada'         , urgencyLabel: 'Atrasada', chipType: 'critico'          };
+      }
+      if (diffDays <= 3) {
+        return { urgencyBadge: 'breve'         , urgencyLabel: 'Vence em breve', chipType: 'atencao'          };
+      }
+      return { urgencyBadge: 'pendente'         , urgencyLabel: 'Pendente', chipType: 'pendente'          };
+    };
+
     const txUpcomingBills = monthTxs
       .filter(
         (t) =>
@@ -2207,15 +2577,24 @@ export class FinancialPlatformStore {
           t.status === 'SCHEDULED' ||
           t.status === 'OVERDUE'
       )
-      .map((t) => ({
-        id: t.id,
-        description: t.description,
-        amountCents: t.amountCents,
-        dueDate: t.dueDate || t.occurrenceDate,
-        occurrenceDate: t.occurrenceDate,
-        status: t.status,
-        isCreditCardInvoice: false,
-      }));
+      .map((t) => {
+        const due = t.dueDate || t.occurrenceDate;
+        const urgency = computeUrgency(due, t.status);
+        return {
+          id: t.id,
+          description: t.description,
+          amountCents: t.amountCents,
+          dueDate: due,
+          occurrenceDate: t.occurrenceDate,
+          status: t.status,
+          isCreditCardInvoice: false,
+          urgencyBadge: urgency.urgencyBadge,
+          urgencyLabel: urgency.urgencyLabel,
+          chipType: urgency.chipType,
+          valueType: t.valueType || 'fixo',
+          recurringExpenseId: t.recurringExpenseId || null,
+        };
+      });
 
     const cardInvoiceBills = creditCardsSummary
       .filter((card) => card.currentInvoiceCents > 0)
@@ -2223,6 +2602,7 @@ export class FinancialPlatformStore {
         const dueDayStr = String(Math.min(28, Math.max(1, card.dueDay))).padStart(2, '0');
         const nextDueMonth = card.dueDay >= 26 ? '2026-10' : '2026-11';
         const dueDateIso = `${nextDueMonth}-${dueDayStr}T10:00:00.000Z`;
+        const urgency = computeUrgency(dueDateIso, 'PENDING');
         return {
           id: `card-invoice-${card.id}`,
           description: `Fatura ${card.name}`,
@@ -2231,6 +2611,11 @@ export class FinancialPlatformStore {
           occurrenceDate: dueDateIso,
           status: 'PENDING'         ,
           isCreditCardInvoice: true,
+          urgencyBadge: urgency.urgencyBadge,
+          urgencyLabel: urgency.urgencyLabel,
+          chipType: urgency.chipType,
+          valueType: 'fixo'         ,
+          recurringExpenseId: null,
         };
       });
 
@@ -2353,6 +2738,33 @@ export class FinancialPlatformStore {
       }
     }
 
+    const userIncomes = this.getUserRecurringIncomes(userId).filter((i) => i.active);
+    const userExpenses = this.getUserRecurringExpenses(userId).filter((e) => e.active);
+    const totalSalaryCents = userIncomes.reduce((s, i) => s + i.amountCents, 0) || monthIncomeCents;
+    const totalFixedExpensesCents =
+      userExpenses.length > 0
+        ? userExpenses.reduce((s, e) => s + e.defaultAmountCents, 0)
+        : monthTxs
+            .filter((t) => t.isFixedCost || (this.categories.get(t.categoryId)?.isFixedCost))
+            .reduce((s, t) => s + t.amountCents, 0);
+
+    const fixedExpensesCommitmentPct =
+      totalSalaryCents > 0
+        ? Math.round((totalFixedExpensesCents / totalSalaryCents) * 1000) / 10
+        : 0;
+
+    if (fixedExpensesCommitmentPct > 60) {
+      structuredInsights.unshift({
+        id: 'insight-fixed-expenses-high',
+        categoryKey: 'global:fixed-costs',
+        severity: 'critico',
+        badgeLabel: 'Alerta de Custos Fixos',
+        title: 'Custos fixos elevados',
+        description: `Seus custos fixos comprometem ${formatPercentBR(fixedExpensesCommitmentPct)} da sua renda mensal. Especialistas recomendam manter abaixo de 50% para preservar sua capacidade de poupança e emergências.`,
+        targetTab: 'recurring',
+      });
+    }
+
     if (structuredInsights.length === 0) {
       structuredInsights.push({
         id: 'insight-default-savings',
@@ -2393,6 +2805,11 @@ export class FinancialPlatformStore {
       effectiveMonthlyBudgetCents,
       availableToSpendMonthCents,
       availableToSpendStatus,
+      fixedExpensesCommitmentPct,
+      totalSalaryCents,
+      totalFixedExpensesCents,
+      recurringIncomes: userIncomes,
+      recurringExpenses: userExpenses,
       savingsRatePercentage,
       expenseComparisonPrevMonthPct,
       expensesByCategory,
@@ -2423,6 +2840,8 @@ export class FinancialPlatformStore {
                              
                          
                          
+                                               
+                                                 
    )                                        {
     const cleanEmail = String(payload.user.email || '').trim().toLowerCase();
     let existingUser = Array.from(this.users.values()).find(
@@ -2534,6 +2953,16 @@ export class FinancialPlatformStore {
     if (Array.isArray(payload.debts)) {
       for (const d of payload.debts) {
         if (d && d.id) this.debts.set(d.id, { ...d, userId });
+      }
+    }
+    if (Array.isArray(payload.recurringIncomes)) {
+      for (const inc of payload.recurringIncomes) {
+        if (inc && inc.id) this.recurringIncomes.set(inc.id, { ...inc, userId });
+      }
+    }
+    if (Array.isArray(payload.recurringExpenses)) {
+      for (const exp of payload.recurringExpenses) {
+        if (exp && exp.id) this.recurringExpenses.set(exp.id, { ...exp, userId });
       }
     }
 
@@ -2720,6 +3149,8 @@ export class FinancialPlatformStore {
     deleteByOwner(this.subcategories);
     deleteByOwner(this.transactions);
     deleteByOwner(this.installments);
+    deleteByOwner(this.recurringIncomes);
+    deleteByOwner(this.recurringExpenses);
     deleteByOwner(this.budgets);
     deleteByOwner(this.goals);
     deleteByOwner(this.goalContributions);

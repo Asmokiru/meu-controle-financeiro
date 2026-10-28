@@ -771,8 +771,7 @@ describe('Meu Controle Financeiro — Suíte Completa de Testes (Segurança, Iso
     const demoLoginData = JSON.parse(demoLoginRes.body);
     assert.equal(demoLoginData.authenticated, true);
     const demoSummary = demoLoginData.state.dashboard;
-    // Orçamento planejado da Mariana (R$ 3.209,00) - Despesas do mês (R$ 6.790,90) = -R$ 3.581,90 (-358190 centavos)
-    assert.equal(demoSummary.availableToSpendMonthCents, -358190);
+    assert.equal(demoSummary.availableToSpendMonthCents, -413180);
     assert.equal(demoSummary.availableToSpendStatus.chipType, 'critico');
     assert.equal(demoSummary.availableToSpendStatus.badgeLabel, 'Orçamento excedido');
     assert.ok(
@@ -835,5 +834,192 @@ describe('Meu Controle Financeiro — Suíte Completa de Testes (Segurança, Iso
     assert.ok(
       reservaGoal.recommendationMessage.includes('já no próximo aporte (1 mês)')
     );
+  });
+
+  it('12. Módulo de Salário (Renda Recorrente), Contas Fixas Mensais, Projeção de Competência e 1-Click Baixa', async () => {
+    const store = new FinancialPlatformStore();
+    const controller = createAppController(store);
+
+    // 1. Criar novo usuário com painel zerado
+    const regRes = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/auth/register',
+      body: {
+        name: 'Carlos Oliveira',
+        email: 'carlos.oliveira@teste.local',
+        password: 'SenhaForte@2026!',
+        acceptedTermsAndPrivacy: true,
+      },
+    });
+    assert.equal(regRes.status, 201);
+    const regData = JSON.parse(regRes.body);
+    const userId = regData.state.user.id;
+    const csrfToken = regData.csrfToken;
+    const cookieHeader = (regRes.headers['Set-Cookie'] || '')
+      .split(',')
+      .map((part: string) => part.trim().split(';')[0])
+      .join('; ');
+
+    // 2. Cadastrar Salário Recorrente (R$ 4.500,00 dia 5)
+    const incRes = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/recurring-incomes',
+      headers: { cookie: cookieHeader, 'x-csrf-token': csrfToken },
+      body: {
+        description: 'Salário Principal CLT',
+        amountCents: 450000,
+        paymentDay: 5,
+        categoryId: 'Salário',
+        currentMonth: '2026-10',
+      },
+    });
+    assert.equal(incRes.status, 201);
+
+    // 3. Cadastrar Contas Fixas (Internet R$ 120,00 fixa dia 10 e Luz R$ 160,00 variável dia 20)
+    const exp1Res = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/recurring-expenses',
+      headers: { cookie: cookieHeader, 'x-csrf-token': csrfToken },
+      body: {
+        description: 'Internet Fibra Óptica',
+        defaultAmountCents: 12000,
+        dueDay: 10,
+        valueType: 'fixo',
+        currentMonth: '2026-10',
+      },
+    });
+    assert.equal(exp1Res.status, 201);
+
+    const exp2Res = await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/recurring-expenses',
+      headers: { cookie: cookieHeader, 'x-csrf-token': csrfToken },
+      body: {
+        description: 'Energia Elétrica',
+        defaultAmountCents: 16000,
+        dueDay: 20,
+        valueType: 'variavel',
+        currentMonth: '2026-10',
+      },
+    });
+    assert.equal(exp2Res.status, 201);
+
+    // 4. Obter estado do mês 2026-10
+    const stateRes = await controller.dispatch({
+      method: 'GET',
+      url: '/api/v1/state?month=2026-10',
+      headers: { cookie: cookieHeader },
+    });
+    assert.equal(stateRes.status, 200);
+    const stateData = JSON.parse(stateRes.body);
+    assert.equal(stateData.recurringIncomes.length, 1);
+    assert.equal(stateData.recurringExpenses.length, 2);
+
+    const summary = stateData.dashboard;
+    assert.equal(summary.totalSalaryCents, 450000);
+    assert.equal(summary.totalFixedExpensesCents, 28000);
+    // Comprometimento: 28000 / 450000 = 6,2%
+    assert.equal(summary.fixedExpensesCommitmentPct, 6.2);
+
+    // Contas pendentes em próximos vencimentos (dia 10 antes do dia 20)
+    assert.equal(summary.upcomingBills.length, 2);
+    assert.equal(summary.upcomingBills[0].description, 'Internet Fibra Óptica');
+    assert.equal(summary.upcomingBills[0].amountCents, 12000);
+    assert.equal(summary.upcomingBills[1].description, 'Energia Elétrica');
+    assert.equal(summary.upcomingBills[1].amountCents, 16000);
+    assert.equal(summary.upcomingBills[1].valueType, 'variavel');
+
+    // 5. Dar baixa rápida na conta de energia com ajuste de valor real (R$ 175,00)
+    const energyBill = summary.upcomingBills[1];
+    const payRes = await controller.dispatch({
+      method: 'POST',
+      url: `/api/v1/transactions/${energyBill.id}/pay`,
+      headers: { cookie: cookieHeader, 'x-csrf-token': csrfToken },
+      body: {
+        actualAmountCents: 17500,
+      },
+    });
+    assert.equal(payRes.status, 200);
+    const paidData = JSON.parse(payRes.body);
+    assert.equal(paidData.status, 'PAID');
+    assert.equal(paidData.amountCents, 17500);
+
+    // Verificar que agora apenas a Internet segue em próximos vencimentos
+    const stateAfterPay = await controller.dispatch({
+      method: 'GET',
+      url: '/api/v1/state?month=2026-10',
+      headers: { cookie: cookieHeader },
+    });
+    const summaryAfterPay = JSON.parse(stateAfterPay.body).dashboard;
+    assert.equal(summaryAfterPay.upcomingBills.length, 1);
+    assert.equal(summaryAfterPay.upcomingBills[0].description, 'Internet Fibra Óptica');
+
+    // 6. Projeção de mês seguinte (2026-11) e idempotência contra duplicações
+    const novStateRes = await controller.dispatch({
+      method: 'GET',
+      url: '/api/v1/state?month=2026-11',
+      headers: { cookie: cookieHeader },
+    });
+    assert.equal(novStateRes.status, 200);
+    const novData = JSON.parse(novStateRes.body);
+    // Em novembro, ambas as contas fixas voltam a constar como pendentes
+    assert.equal(novData.dashboard.upcomingBills.length, 2);
+
+    const txNovCount1 = novData.transactions.filter((t: { occurrenceDate: string }) =>
+      t.occurrenceDate.startsWith('2026-11')
+    ).length;
+    assert.equal(txNovCount1, 3); // 1 renda fixa + 2 contas fixas
+
+    // Chamar novamente (F5) não duplica
+    const novStateRes2 = await controller.dispatch({
+      method: 'GET',
+      url: '/api/v1/state?month=2026-11',
+      headers: { cookie: cookieHeader },
+    });
+    const novData2 = JSON.parse(novStateRes2.body);
+    const txNovCount2 = novData2.transactions.filter((t: { occurrenceDate: string }) =>
+      t.occurrenceDate.startsWith('2026-11')
+    ).length;
+    assert.equal(txNovCount2, 3);
+
+    // 7. Testar alerta de comprometimento de renda > 60%
+    await controller.dispatch({
+      method: 'POST',
+      url: '/api/v1/recurring-expenses',
+      headers: { cookie: cookieHeader, 'x-csrf-token': csrfToken },
+      body: {
+        description: 'Financiamento Imobiliário',
+        defaultAmountCents: 300000,
+        dueDay: 15,
+        valueType: 'fixo',
+        currentMonth: '2026-10',
+      },
+    });
+    const stateHighExp = await controller.dispatch({
+      method: 'GET',
+      url: '/api/v1/state?month=2026-10',
+      headers: { cookie: cookieHeader },
+    });
+    const summaryHighExp = JSON.parse(stateHighExp.body).dashboard;
+    // Total fixo: 12000 + 16000 + 300000 = 328000. Salário: 450000. Comprometimento: 72,9%
+    assert.equal(summaryHighExp.fixedExpensesCommitmentPct, 72.9);
+    const highCommitmentInsight = summaryHighExp.structuredInsights.find(
+      (ins: { title: string }) => ins.title === 'Custos fixos elevados'
+    );
+    assert.ok(highCommitmentInsight);
+    assert.equal(highCommitmentInsight.severity, 'critico');
+    assert.ok(highCommitmentInsight.description.includes('72,9%'));
+
+    // 8. Verificar que a Mariana já possui dados limpos de recorrência na demonstração
+    const mariana = Array.from(store.users.values()).find(
+      (u) => u.email === 'demo@exemplo.ficticio.local'
+    );
+    assert.ok(mariana);
+    const marianaRecIncomes = store.getUserRecurringIncomes(mariana.id);
+    const marianaRecExpenses = store.getUserRecurringExpenses(mariana.id);
+    assert.ok(marianaRecIncomes.length >= 2);
+    assert.ok(marianaRecExpenses.length >= 4);
+    assert.ok(marianaRecIncomes.some((i) => i.description.includes('Salário')));
+    assert.ok(marianaRecExpenses.some((e) => e.description.includes('Aluguel')));
   });
 });
